@@ -15,9 +15,11 @@ tracks who comments on X, locks the chat until enough people comment, and keeps 
 
    Being an admin also lets the bot see every message. It needs that to keep the member list up to date
    and to find the X link for `@raidall`.
-2. Every admin presses **Start** on the bot once in a private chat, so it can send them reports.
+2. Every admin presses **Start** on the bot once in a private chat. The bot answers admin commands there, so
+   the group only sees what the community needs. Admins who skip this get their answers in the group for a
+   few seconds instead.
 3. In the group, run `/addusers @name1 @name2 ...` once to load the starting member list.
-4. Run `/settemplate` to set the raid message.
+4. Run `/settemplate` in the group, then send the raid message to the bot in the private chat it opens.
 
 ## Running it
 

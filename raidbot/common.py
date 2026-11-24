@@ -1,5 +1,6 @@
 """Helpers shared by the Telegram handlers."""
 
+import html
 import logging
 import time
 
@@ -103,6 +104,50 @@ async def reply_temp(context: ContextTypes.DEFAULT_TYPE, message: Message, text:
                      seconds: int = SHORT, **kwargs) -> Message | None:
     """Answer a group message with a message that deletes itself later."""
     return await send_temp(context, message.chat_id, text, seconds, **kwargs)
+
+
+# ---------------------------------------------------------------- answers for admins only
+
+def private_target(message: Message) -> int | None:
+    """The user ID to message privately, or None for anonymous admins (they can't be messaged)."""
+    user = message.from_user
+    if message.sender_chat or not user or user.id == ANONYMOUS_ADMIN_BOT_ID:
+        return None
+    return user.id
+
+
+async def tell_admin(context: ContextTypes.DEFAULT_TYPE, message: Message, text: str,
+                     seconds: int = SHORT, **kwargs) -> bool:
+    """Answer an admin command in the admin's private chat, so the group stays clean.
+
+    Falls back to a short-lived group message when the admin is anonymous or
+    hasn't pressed Start on the bot yet. Returns True if it went privately.
+    """
+    return await tell_admin_id(context, message.chat_id, private_target(message), text, seconds,
+                               group_title=message.chat.title, **kwargs)
+
+
+async def tell_admin_id(context: ContextTypes.DEFAULT_TYPE, chat_id: int, user_id: int | None, text: str,
+                        seconds: int = SHORT, group_title: str | None = None, **kwargs) -> bool:
+    kwargs.setdefault("parse_mode", ParseMode.HTML)
+    kwargs.setdefault("disable_web_page_preview", True)
+    note = ""
+    if user_id:
+        if group_title is None:
+            group = get_db(context).get_group(chat_id)
+            group_title = group["title"] if group else None
+        header = f"<b>{html.escape(group_title)}</b>\n" if group_title else ""
+        try:
+            await context.bot.send_message(user_id, header + text, **kwargs)
+            return True
+        except TelegramError as e:
+            log.info("Couldn't message admin %s privately, answering in the group: %s", user_id, e)
+            note = (f'\n\n<a href="{bot_link(context)}">Press Start on me</a> and I\'ll send '
+                    "answers like this to you privately.")
+    else:
+        note = "\n\nTurn off 'Remain anonymous' and I'll send answers like this to you privately."
+    await send_temp(context, chat_id, text + note, seconds, **kwargs)
+    return False
 
 
 def delete_later(context: ContextTypes.DEFAULT_TYPE, chat_id: int, message_id: int,

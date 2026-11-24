@@ -61,7 +61,8 @@ FOR ADMINS: TAGGING AND RAIDS
 /endraid
     Ends a raid early and posts the summary. Any "Chat unlocked" summary from
     that raid is deleted then, so only the final summary stays.
-    If more than one raid is running, the bot shows buttons so you can pick which one.
+    If more than one raid is running, the bot sends you buttons privately so you
+    can pick which one.
 
 /raidlock 15 60m
     Locks the chat for everyone except admins until 15 registered members have
@@ -117,13 +118,13 @@ FOR ADMINS: SETUP
 
 /members
     Shows how many members the bot knows, and who isn't registered yet.
-    Sent to you privately.
 
 /settemplate
 /settemplate fun
     Saves a raid template. Without a name it's the default template; with a name
     (fun, bull, anything with letters, numbers or _) you get a named one.
-    The bot asks you to send it next:
+    Type it in the group. The bot then asks for the template in your private
+    chat with it, and you send it there:
       - send plain text for a text-only template, or
       - send a photo with the template as its caption, and that image is
         attached every time this template is used.
@@ -150,7 +151,8 @@ FOR ADMINS: SETUP
     Deletes a template.
 
 /setgreet
-    Sets the welcome message for new members. The bot asks you to send it next.
+    Sets the welcome message for new members. Type it in the group, and the bot
+    asks you to send the message in your private chat with it.
     Put {name} where the new member's name should go. A Register button is added
     automatically.
 
@@ -197,11 +199,17 @@ KEEPING THE CHAT CLEAN
 - "@all" or "@raidall fun <link>" sent on their own are deleted the same way.
   If you wrote a real message around them ("@all gm fam, call in 10"), your
   message stays.
-- The bot's short answers (confirmations such as "X feed on", errors, cooldown
-  notes) delete after 15 seconds.
-- Previews, /templates, /raidhelp and /leaderboard answers delete after 1 minute.
-- The /settemplate and /setgreet prompts, and the message you sent with the
-  template, are deleted once it's saved. You get a preview for 1 minute instead.
+- Anything only an admin needs is sent to that admin in a private chat, not the
+  group: confirmations (like "X feed on"), errors, usage hints, cooldown notes,
+  /feeds, /templates, /members, template previews, the /settemplate and
+  /setgreet setup, the /endraid buttons, and problems posting or pinning a raid.
+  Each one starts with the group's name, so you know which group it's about.
+- For that to work, press Start on @raids_bot once. If you haven't, or you post
+  as an anonymous admin, the answer shows in the group instead with a note, and
+  deletes after 15 seconds (1 minute for lists and previews). /settemplate and
+  /setgreet only work in the private chat, so they just show the note.
+- /raidhelp and /leaderboard are for everyone, so they stay in the group and
+  delete after 1 minute.
 - The "Chat locked" notice is removed when the chat unlocks.
 - The "Chat unlocked" summary is removed when the raid ends and its final
   summary is posted.

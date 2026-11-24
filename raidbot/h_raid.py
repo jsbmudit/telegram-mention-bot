@@ -14,8 +14,8 @@ from telegram.ext import ContextTypes
 
 from . import core
 from .common import (
-    MEDIUM, delete_later, get_cfg, get_db, get_x, is_admin, is_group, message_links, reply_temp,
-    safe_delete, send_temp, sender_key,
+    MEDIUM, delete_later, get_cfg, get_db, get_x, is_admin, is_group, message_links, safe_delete,
+    sender_key, tell_admin, tell_admin_id,
 )
 from .db import DEFAULT_TEMPLATE
 from .utils import (
@@ -96,7 +96,7 @@ async def start_tagging(update: Update, context: ContextTypes.DEFAULT_TYPE, raid
     if raid:
         template, words, error = pick_template(db, msg.chat_id, words)
         if error:
-            await reply_temp(context, msg, error)
+            await tell_admin(context, msg, error)
             return
 
     # "@all" or "@raidall fun <link>" on its own is just a command: tidy it away.
@@ -106,21 +106,21 @@ async def start_tagging(update: Update, context: ContextTypes.DEFAULT_TYPE, raid
 
     wait = group["last_tag_at"] + cfg.tag_cooldown - time.time()
     if wait > 0:
-        await reply_temp(context, msg, f"Tagging is on cooldown. Try again in {format_duration(wait)}.")
+        await tell_admin(context, msg, f"Tagging is on cooldown. Try again in {format_duration(wait)}.")
         return
 
     link = None
     if raid:
         link = find_raid_link(context, msg)
         if not link:
-            await reply_temp(
+            await tell_admin(
                 context, msg,
                 "I couldn't find an X post link. Post the link first, or put it in the same message as @raidall.",
             )
             return
 
     if not db.list_members(msg.chat_id):
-        await reply_temp(context, msg, "I don't know any members yet. Add them with /addusers @name1 @name2.")
+        await tell_admin(context, msg, "I don't know any members yet. Add them with /addusers @name1 @name2.")
         if not raid:
             return
 
@@ -176,6 +176,11 @@ async def lookup_author(context: ContextTypes.DEFAULT_TYPE, tweet_id: str, url: 
     return conv, name, handle
 
 
+def _admin_id(started_by: int) -> int | None:
+    """started_by is the group's own ID for anonymous admins, who can't be messaged privately."""
+    return started_by if started_by > 0 else None
+
+
 async def _post_raid(context: ContextTypes.DEFAULT_TYPE, chat_id: int, started_by: int,
                      tweet_id: str, url: str, template_name: str) -> None:
     from .h_settings import post_template
@@ -183,7 +188,8 @@ async def _post_raid(context: ContextTypes.DEFAULT_TYPE, chat_id: int, started_b
     db, cfg = get_db(context), get_cfg(context)
     tpl = db.get_template(chat_id, template_name)
     if not tpl:
-        await send_temp(context, chat_id, f"The template {html.escape(template_name)} was deleted. Raid not posted.", MEDIUM)
+        await tell_admin_id(context, chat_id, _admin_id(started_by),
+                            f"The template {html.escape(template_name)} was deleted. Raid not posted.", MEDIUM)
         return
     conv, xname, xhandle = await lookup_author(context, tweet_id, url)
     text = render_template(tpl["body_html"], url, xname, xhandle)
@@ -191,7 +197,8 @@ async def _post_raid(context: ContextTypes.DEFAULT_TYPE, chat_id: int, started_b
         main, _ = await post_template(context, chat_id, text, tpl["photo_file_id"])
     except TelegramError as e:
         log.warning("Couldn't post the raid message in chat %s: %s", chat_id, e)
-        await send_temp(context, chat_id, "I couldn't post the raid message. Check the template with /template.", MEDIUM)
+        await tell_admin_id(context, chat_id, _admin_id(started_by),
+                            "I couldn't post the raid message. Check the template with /template.", MEDIUM)
         return
 
     raid = db.create_raid(chat_id, tweet_id, url, started_by, cfg.raid_duration, main.message_id)
@@ -202,7 +209,8 @@ async def _post_raid(context: ContextTypes.DEFAULT_TYPE, chat_id: int, started_b
         await context.bot.pin_chat_message(chat_id, main.message_id, disable_notification=False)
     except TelegramError as e:
         log.warning("Couldn't pin in chat %s: %s", chat_id, e)
-        await send_temp(context, chat_id, "I couldn't pin the raid message. Give me the 'Pin messages' admin right.", MEDIUM)
+        await tell_admin_id(context, chat_id, _admin_id(started_by),
+                            "I couldn't pin the raid message. Give me the 'Pin messages' admin right.", MEDIUM)
 
 
 # ---------------------------------------------------------------- tracking
@@ -329,7 +337,7 @@ async def endraid_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
     raids = get_db(context).active_raids(msg.chat_id)
     if not raids:
-        await reply_temp(context, msg, "No raid is running right now.")
+        await tell_admin(context, msg, "No raid is running right now.")
         return
     if len(raids) == 1:
         await end_raid(context, raids[0], "ended by an admin")
@@ -341,21 +349,20 @@ async def endraid_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         )]
         for r in raids
     ]
-    await reply_temp(context, msg, "More than one raid is running. Which one should end?", MEDIUM,
+    await tell_admin(context, msg, "More than one raid is running. Which one should end?", MEDIUM,
                      reply_markup=InlineKeyboardMarkup(buttons))
 
 
 async def endraid_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # The buttons are usually in the admin's private chat, so the group comes from the raid itself.
     query = update.callback_query
-    chat_id = query.message.chat_id
-    if not await is_admin(context, chat_id, user_id=query.from_user.id):
+    raid = get_db(context).get_raid(int(query.data.split(":")[1]))
+    if not raid or not await is_admin(context, raid["chat_id"], user_id=query.from_user.id):
         await query.answer("Only admins can end a raid.", show_alert=True)
         return
     await query.answer()
-    raid = get_db(context).get_raid(int(query.data.split(":")[1]))
     try:
         await query.message.delete()
     except TelegramError:
         pass
-    if raid and raid["chat_id"] == chat_id:
-        await end_raid(context, raid, "ended by an admin")
+    await end_raid(context, raid, "ended by an admin")

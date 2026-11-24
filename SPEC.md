@@ -44,26 +44,33 @@ Status: built. Hosting will be decided next. Every command is explained in COMMA
 ## 4. Raids
 
 - Named templates per group: `/settemplate` saves the default one, `/settemplate fun` saves one called fun.
-  The admin sends text, or a photo with the template as its caption to attach that image. It must contain `{link}`.
+  The admin types the command in the group, and the bot asks for the template in a private chat. The admin
+  sends text there, or a photo with the template as its caption to attach that image. It must contain `{link}`.
   Bold, italics and links are kept.
 - Template variables: `{link}`, `{xname}` (X display name of the post author), `{xhandle}`, `{xprofile}`.
   The author is looked up with the X API when a key is set, otherwise with X's public embed service.
-- `/templates` lists them, `/template fun` previews one, `/deltemplate fun` deletes one.
+- `/templates` lists them, `/template fun` previews one, `/deltemplate fun` deletes one. Lists and previews are sent privately.
 - `@raidall` (admin, also `@allraid`, `/raidall`, `/allraid`), optionally followed by a template name:
   1. Uses the X link in the same message, or the latest X link the same admin posted.
   2. Tags everyone, the same way as `@all`.
   3. Posts the chosen template with the link and author filled in, with its image if it has one.
   4. Pins it with notification. It is never unpinned.
 - A raid lasts 12 hours, or until `/endraid`.
-- More than one raid can be live at the same time. If several are live, `/endraid` shows buttons so the admin can pick which one to end.
+- More than one raid can be live at the same time. If several are live, `/endraid` sends the admin buttons privately so they can pick which one to end.
 
 ## 4b. Keeping the chat clean
 
 - Bot commands are deleted from the group about 3 seconds after they're sent.
 - `@all` / `@raidall name <link>` sent on their own are deleted too. A real message around them is left alone.
-- Short answers delete after 15 seconds, including admin confirmations like "X feed on"; previews, lists, help and on-demand leaderboards after 1 minute.
+- Answers that only matter to the admin go to that admin in a private chat, never the group. This covers
+  confirmations, errors, usage hints, cooldown notes, lists (`/feeds`, `/templates`, `/members`), template and
+  welcome previews, the `/settemplate` and `/setgreet` setup, the `/endraid` buttons, and problems posting or
+  pinning a raid. Each private answer starts with the group's name.
+- If the bot can't message the admin (they never pressed Start on it, or they post as an anonymous admin), the
+  answer shows in the group instead, with a note on how to get it privately. It deletes after 15 seconds, or after
+  1 minute for lists and previews. `/settemplate` and `/setgreet` need the private chat, so they only show that note.
+- `/raidhelp` and `/leaderboard` are for everyone, so they stay in the group and delete after 1 minute.
 - The /register button deletes as soon as someone opens the bot through it, or after 15 seconds.
-- Setup prompts and the admin's template message are deleted once a template is saved.
 - The lock notice is removed when the chat unlocks.
 - A "Chat unlocked" summary is removed when the raid's final summary is posted, since the final one has the full results.
 - Kept: the pinned raid message, the final raid summary, and the weekly leaderboard.
@@ -117,7 +124,7 @@ Status: built. Hosting will be decided next. Every command is explained in COMMA
 - Running `/feedon` again for the same account replaces its settings, so `/feedon VeronaOfficial` on its own turns pinning off.
 - Feed pins are never unpinned by the bot.
 - `/feedoff VeronaOfficial` stops it, `/feeds` lists what's on. Any number of accounts and groups.
-- Starts from the newest post, checks every minute (`FEED_INTERVAL_MINUTES`). A check that finds no new posts costs nothing, sends images when a post has one, and caps at 10 posts per check so a long outage doesn't flood the chat.
+- Starts from the newest post, checks every minute (`FEED_INTERVAL_MINUTES`), sends images when a post has one, and caps at 10 posts per check so a long outage doesn't flood the chat. A check that finds no new posts costs nothing.
 - One X request per account per check, even when several groups follow the same account.
 - Needs the X API key.
 
@@ -127,7 +134,7 @@ Status: built. Hosting will be decided next. Every command is explained in COMMA
 
 ## 12. Welcome message
 
-- `/setgreet` (admin): set the same way as the template. It includes a Register button.
+- `/setgreet` (admin): set the same way as the template, in a private chat with the bot. It includes a Register button.
 - Posted automatically when someone joins.
 - `/greet` (admin) posts it on demand. When used as a reply to someone, it's linked to that person.
 - It deletes itself once the person registers, or after 24 hours, whichever comes first. Telegram doesn't let bots delete messages older than 48 hours.

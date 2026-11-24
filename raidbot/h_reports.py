@@ -11,7 +11,7 @@ from telegram.ext import ContextTypes
 
 from . import core
 from .common import (
-    MEDIUM, ANONYMOUS_ADMIN_BOT_ID, admin_ids, bot_link, get_db, is_admin, is_group, reply_temp, safe_delete,
+    MEDIUM, ANONYMOUS_ADMIN_BOT_ID, admin_ids, bot_link, get_db, is_admin, is_group, reply_temp, safe_delete, tell_admin,
 )
 from .utils import week_start
 
@@ -38,10 +38,10 @@ async def raidcsv_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         raids = [raid] if raid else []
         label = f"raid{raid['raid_no']}" if raid else ""
     else:
-        await reply_temp(context, msg, "Usage: /raidcsv, /raidcsv 3 or /raidcsv all")
+        await tell_admin(context, msg, "Usage: /raidcsv, /raidcsv 3 or /raidcsv all")
         return
     if not raids:
-        await reply_temp(context, msg, "I couldn't find that raid.")
+        await tell_admin(context, msg, "I couldn't find that raid.")
         return
 
     user = msg.from_user
@@ -124,6 +124,8 @@ HELP_TEXT = """<b>Raid bot commands</b>
 /me: see what you registered (private chat)
 /leaderboard: this week's leaderboard
 
+<b>Admins</b>: I answer your commands in a private chat, so press Start on me once.
+
 <b>Admins: tagging and raids</b>
 @all: tag everyone (15 min cooldown, tags delete after 4h)
 @raidall: tag everyone, then post and pin the default raid message
@@ -134,7 +136,7 @@ HELP_TEXT = """<b>Raid bot commands</b>
 
 <b>Admins: templates</b>
 /settemplate: set the default raid template
-/settemplate fun: set a template called fun (send a photo with caption to attach an image)
+/settemplate fun: set a template called fun (I ask for it privately; send a photo with caption to attach an image)
 /templates: list all templates
 /template fun: preview a template
 /deltemplate fun: delete a template

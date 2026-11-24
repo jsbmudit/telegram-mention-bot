@@ -14,7 +14,7 @@ from telegram.constants import ParseMode
 from telegram.error import TelegramError
 from telegram.ext import ContextTypes
 
-from .common import MEDIUM, SHORT, get_cfg, get_db, get_x, is_admin, is_group, reply_temp
+from .common import MEDIUM, SHORT, get_cfg, get_db, get_x, is_admin, is_group, tell_admin
 from .utils import format_duration, is_due, normalize_x_handle
 from .xapi import Post, XApiError, XRateLimited
 
@@ -43,37 +43,37 @@ async def feedon_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     handle = normalize_x_handle(args[0]) if args else None
     options = {a.lower() for a in args[1:]}
     if not handle or not options <= {"all", "pin"} or len(args) - 1 != len(options):
-        await reply_temp(context, msg, FEEDON_USAGE)
+        await tell_admin(context, msg, FEEDON_USAGE)
         return
     mode = "all" if "all" in options else "posts"
     pin = "pin" in options
     x = get_x(context)
     if not x:
-        await reply_temp(context, msg, NO_KEY)
+        await tell_admin(context, msg, NO_KEY)
         return
     try:
         user = await x.lookup_user(handle)
         if not user:
-            await reply_temp(context, msg, f"I couldn't find @{html.escape(handle)} on X.")
+            await tell_admin(context, msg, f"I couldn't find @{html.escape(handle)} on X.")
             return
         # Start from their newest post so old posts aren't dumped into the group.
         latest = await x.user_posts(user["id"], include_all=True, max_results=5, max_pages=1)
     except XApiError as e:
         log.warning("Feed setup failed: %s", e)
-        await reply_temp(context, msg, "X didn't answer properly. Try again in a few minutes.")
+        await tell_admin(context, msg, "X didn't answer properly. Try again in a few minutes.")
         return
     since = max((p.id for p in latest), key=int, default=None)
     get_db(context).add_feed(msg.chat_id, user["id"], user["username"], user["name"], mode, since, pin)
     what = "posts, replies and reposts" if mode == "all" else "posts"
     interval = get_cfg(context).feed_interval
     every = "minute" if interval == 60 else format_duration(interval)
-    await reply_temp(
+    await tell_admin(
         context, msg,
         f"X feed on: new {what} from <b>{html.escape(user['name'] or user['username'])}</b> "
         f"(@{html.escape(user['username'])}) will be posted here"
         f"{' and pinned with a notification' if pin else ''}. I check every {every}.\n"
         f"Turn it off with /feedoff {html.escape(user['username'])}",
-        SHORT,  # only the admin needs it, so it goes quickly like other confirmations
+        SHORT,  # only used if it can't go privately: then it goes quickly like other confirmations
     )
 
 
@@ -83,12 +83,12 @@ async def feedoff_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
     handle = normalize_x_handle(context.args[0]) if context.args else None
     if not handle:
-        await reply_temp(context, msg, "Usage: /feedoff VeronaOfficial (see what's on with /feeds)")
+        await tell_admin(context, msg, "Usage: /feedoff VeronaOfficial (see what's on with /feeds)")
         return
     if get_db(context).remove_feed(msg.chat_id, handle):
-        await reply_temp(context, msg, f"X feed off for @{html.escape(handle)}.")
+        await tell_admin(context, msg, f"X feed off for @{html.escape(handle)}.")
     else:
-        await reply_temp(context, msg, f"There's no feed for @{html.escape(handle)} here. See /feeds.")
+        await tell_admin(context, msg, f"There's no feed for @{html.escape(handle)} here. See /feeds.")
 
 
 async def feeds_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -97,7 +97,7 @@ async def feeds_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     feeds = get_db(context).feeds_for_chat(msg.chat_id)
     if not feeds:
-        await reply_temp(context, msg, "No X feeds are on. Start one with /feedon VeronaOfficial")
+        await tell_admin(context, msg, "No X feeds are on. Start one with /feedon VeronaOfficial")
         return
     lines = ["<b>X feeds in this group</b>"]
     for f in feeds:
@@ -107,7 +107,7 @@ async def feeds_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         lines.append(f"@{html.escape(f['handle'])} ({what}): turn off with /feedoff {html.escape(f['handle'])}")
     if not get_x(context):
         lines += ["", NO_KEY]
-    await reply_temp(context, msg, "\n".join(lines), MEDIUM)
+    await tell_admin(context, msg, "\n".join(lines), MEDIUM)
 
 
 # ---------------------------------------------------------------- posting

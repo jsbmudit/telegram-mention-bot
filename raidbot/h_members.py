@@ -11,7 +11,7 @@ from telegram.error import TelegramError
 from telegram.ext import ContextTypes
 
 from .common import (
-    MEDIUM, bot_link, get_cfg, get_db, is_admin, is_group, message_links, reply_temp, safe_delete,
+    MEDIUM, bot_link, get_cfg, get_db, is_admin, is_group, message_links, safe_delete, tell_admin,
     sender_key,
 )
 from .utils import mention_html
@@ -186,14 +186,14 @@ async def addusers_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             _remember(context, msg.chat_id, ent.user)
             linked += 1
     if not names and not linked:
-        await reply_temp(context, msg, "Usage: /addusers @name1 @name2 @name3")
+        await tell_admin(context, msg, "Usage: /addusers @name1 @name2 @name3")
         return
     added, existing = db.add_usernames(msg.chat_id, names)
     total = len(db.list_members(msg.chat_id))
     text = f"Added {added + linked}. Already on the list: {existing}. Members I know now: {total}."
     if skipped:
         text += "\nSkipped (not valid Telegram usernames): " + ", ".join(skipped)
-    await reply_temp(context, msg, text)
+    await tell_admin(context, msg, text)
 
 
 async def removeuser_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -202,11 +202,11 @@ async def removeuser_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
     names = _USERNAME_RE.findall(msg.text or "")
     if not names:
-        await reply_temp(context, msg, "Usage: /removeuser @name")
+        await tell_admin(context, msg, "Usage: /removeuser @name")
         return
     db = get_db(context)
     removed = sum(db.remove_member_by_username(msg.chat_id, n) for n in names)
-    await reply_temp(context, msg, f"Removed {removed} from the tag list.")
+    await tell_admin(context, msg, f"Removed {removed} from the tag list.")
 
 
 async def members_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -226,15 +226,4 @@ async def members_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         lines += ["", "<b>Not registered</b>", ", ".join(names[:100])]
         if len(names) > 100:
             lines.append(f"and {len(names) - 100} more")
-    # Sent privately so the member list doesn't clutter the group.
-    user = msg.from_user
-    if user and not msg.sender_chat:
-        try:
-            await context.bot.send_message(
-                user.id, f"<b>{html.escape(update.effective_chat.title or 'Your group')}</b>\n" + "\n".join(lines),
-                parse_mode=ParseMode.HTML,
-            )
-            return
-        except TelegramError:
-            pass
-    await reply_temp(context, msg, "\n".join(lines), MEDIUM)
+    await tell_admin(context, msg, "\n".join(lines), MEDIUM)

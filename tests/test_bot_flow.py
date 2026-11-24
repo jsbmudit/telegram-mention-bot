@@ -43,6 +43,7 @@ class FakeTelegram(BaseRequest):
         self.calls: list[tuple[str, dict]] = []
         self.files: list[bytes] = []
         self.ids = itertools.count(100)
+        self.blocked: set[int] = set()  # users who never pressed Start: private messages to them fail
 
     @property
     def read_timeout(self):
@@ -71,6 +72,9 @@ class FakeTelegram(BaseRequest):
                 content = f[1] if isinstance(f, tuple) else f
                 self.files.append(content)
         self.calls.append((name, params))
+        if name.startswith("send") and int(params.get("chat_id", 0) or 0) in self.blocked:
+            return 403, json.dumps({"ok": False, "error_code": 403,
+                                    "description": "Forbidden: bot can't initiate conversation with a user"}).encode()
         return 200, json.dumps({"ok": True, "result": self.result(name, params)}).encode()
 
     def result(self, name: str, p: dict):
@@ -175,8 +179,9 @@ class Harness:
         await self.app.process_update(Update.de_json({"update_id": next(self.ids), key: msg}, self.app.bot))
         await self.settle()
 
-    async def dm(self, user, text):
-        await self.send(user, text, chat={"id": user["id"], "type": "private", "first_name": user["first_name"]})
+    async def dm(self, user, text, **extra):
+        await self.send(user, text, chat={"id": user["id"], "type": "private", "first_name": user["first_name"]},
+                        **extra)
 
     async def press(self, user, data, chat):
         bot_msg = {"message_id": 1, "date": int(time.time()), "chat": chat,
@@ -214,7 +219,10 @@ async def _full_raid_flow(tmp_path):
     await h.send(STRANGER, "/addusers @hacker")
     assert not any("Added" in t for t in tg.texts())
     await h.send(ADMIN, "/addusers @alice @bobby @carol @daveo @erinn @frank @x")
-    assert any("Added 6" in t and "Skipped (not valid Telegram usernames): @x" in t for t in tg.texts())
+    added = [p for p in tg.of("sendMessage") if "Added 6" in p["text"]]
+    assert len(added) == 1 and "Skipped (not valid Telegram usernames): @x" in added[0]["text"]
+    # Admin-only answers go to the admin privately, headed with the group's name.
+    assert int(added[0]["chat_id"]) == ADMIN["id"] and added[0]["text"].startswith("<b>Raid Group</b>")
 
     # 2. Alice talks, so her preloaded row gets her user ID.
     await h.send(ALICE, "gm")
@@ -238,12 +246,18 @@ async def _full_raid_flow(tmp_path):
     assert any("already registered by someone else" in t for t in tg.texts())
     await h.dm(BOB, "/cancel")
 
-    # 4. Admin sets the raid template; one without {link} is refused.
+    # 4. Admin sets the raid template: typed in the group, then done in a private chat.
+    tg.clear()
     await h.send(ADMIN, "/settemplate")
-    await h.send(ADMIN, "no link here")
+    prompts = tg.of("sendMessage")
+    assert len(prompts) == 1 and int(prompts[0]["chat_id"]) == ADMIN["id"]
+    assert "New template: default" in prompts[0]["text"]
+    await h.dm(ADMIN, "no link here")  # one without {link} is refused
     assert db.get_template(CHAT["id"], "default") is None
-    await h.send(ADMIN, "RAID NOW {link} like and comment")
+    await h.dm(ADMIN, "RAID NOW {link} like and comment")
     assert "{link}" in db.get_template(CHAT["id"], "default")["body_html"]
+    # Nothing about the setup was posted in the group.
+    assert all(int(p["chat_id"]) == ADMIN["id"] for p in tg.of("sendMessage") + tg.of("sendPhoto"))
 
     # 5. Admin posts the link, then @raidall: tags (registered first), raid message, pin.
     await h.send(ADMIN, f"new post {POST}?s=20")
@@ -317,8 +331,11 @@ async def _full_raid_flow(tmp_path):
     assert len(db.active_raids(CHAT["id"])) == 2
     tg.clear()
     await h.send(ADMIN, "/endraid")
-    assert tg.of("sendMessage")[-1].get("reply_markup")
-    await h.press(ADMIN, f"endraid:{raid['id']}", CHAT)
+    choice = tg.of("sendMessage")[-1]
+    assert choice.get("reply_markup") and int(choice["chat_id"]) == ADMIN["id"]  # buttons come privately
+    await h.press(STRANGER, f"endraid:{raid['id']}", {"id": STRANGER["id"], "type": "private", "first_name": "Rando"})
+    assert db.get_raid(raid["id"])["status"] == "active"  # non-admins can't use them
+    await h.press(ADMIN, f"endraid:{raid['id']}", {"id": ADMIN["id"], "type": "private", "first_name": "Admin"})
     assert db.get_raid(raid["id"])["status"] == "ended"
     assert any("Raid #1 is over" in t for t in tg.texts())
     # The final summary replaces the earlier "Chat unlocked" summary.
@@ -378,8 +395,26 @@ async def _cleanup_and_named_templates(tmp_path):
     cmd_rows = _scheduled(db, h.last_id)
     assert cmd_rows and cmd_rows[0]["delete_at"] - time.time() < 5
     reply = [p for p in tg.of("sendMessage") if "Added" in p["text"]][0]
-    # The bot's answer goes too, after about 15 seconds.
-    assert len(db.due_deletes(time.time() + 16)) >= 2
+    # The bot's answer went to the admin privately, so there's nothing else to clean up in the group.
+    assert int(reply["chat_id"]) == ADMIN["id"]
+    assert [r["message_id"] for r in db.due_deletes(time.time() + 10 ** 6)] == [h.last_id]
+
+    # An admin who never pressed Start gets the answer in the group for 15 seconds, with a hint.
+    tg.blocked.add(ADMIN["id"])
+    tg.clear()
+    await h.send(ADMIN, "/removeuser @bobby")
+    in_group = [p for p in tg.of("sendMessage") if int(p["chat_id"]) == chat_id]
+    assert len(in_group) == 1 and "Removed 1" in in_group[0]["text"] and "Press Start on me" in in_group[0]["text"]
+    waits = sorted(r["delete_at"] - time.time() for r in db.due_deletes(time.time() + 10 ** 6))
+    assert len(waits) == 3 and 10 < waits[-1] <= 15
+    # /settemplate can't start then: the group gets a short hint instead.
+    tg.clear()
+    await h.send(ADMIN, "/settemplate")
+    assert any("Press Start" in p["text"] for p in tg.of("sendMessage") if int(p["chat_id"]) == chat_id)
+    await h.dm(ADMIN, "Never saved {link}")
+    assert db.get_template(chat_id, "default") is None
+    tg.blocked.clear()
+    await h.send(ADMIN, "/addusers @bobby")
 
     # A command for some other bot is left alone.
     await h.send(ADMIN, "/start@someotherbot")
@@ -409,18 +444,29 @@ async def _cleanup_and_named_templates(tmp_path):
     # Named template with an image and {xname}/{xprofile}.
     await h.send(ADMIN, "/settemplate fun")
     tg.clear()
-    await h.send(ADMIN, "", photo=[{"file_id": "PHOTO_FUN", "file_unique_id": "pf", "width": 9, "height": 9}],
-                 caption="Our dear friend {xname} is posting, show him how Verona bulls are! {link} {xprofile}")
+    await h.dm(ADMIN, "", photo=[{"file_id": "PHOTO_FUN", "file_unique_id": "pf", "width": 9, "height": 9}],
+               caption="Our dear friend {xname} is posting, show him how Verona bulls are! {link} {xprofile}")
     tpl = db.get_template(chat_id, "fun")
     assert tpl["photo_file_id"] == "PHOTO_FUN"
-    # The setup prompt and the admin's own template message get cleaned up.
-    assert _scheduled(db, h.last_id)
+    # The preview is shown in the private chat, not the group.
     previews = tg.of("sendPhoto")
-    assert previews and "Andyyy" in previews[0]["caption"]
+    assert previews and "Andyyy" in previews[0]["caption"] and int(previews[0]["chat_id"]) == ADMIN["id"]
 
     await h.send(ADMIN, "/settemplate")
-    await h.send(ADMIN, "Plain raid {link}")
+    await h.dm(ADMIN, "Plain raid {link}")
     assert db.get_template(chat_id, "default")
+
+    # /template name previews privately too.
+    tg.clear()
+    await h.send(ADMIN, "/template fun")
+    assert [int(p["chat_id"]) for p in tg.of("sendMessage") + tg.of("sendPhoto")] == [ADMIN["id"], ADMIN["id"]]
+
+    # /setgreet works the same way.
+    tg.clear()
+    await h.send(ADMIN, "/setgreet")
+    await h.dm(ADMIN, "Welcome {name}!")
+    assert db.get_group(chat_id)["welcome_html"] == "Welcome {name}!"
+    assert all(int(p["chat_id"]) == ADMIN["id"] for p in tg.of("sendMessage"))
 
     # Unknown template name: a short error, nothing posted.
     tg.clear()
@@ -543,10 +589,12 @@ async def _x_feed_and_rose_names(tmp_path):
     feed = db.feeds_for_chat(chat_id)[0]
     assert feed["pin"] == 1 and feed["mode"] == "all"
     assert any("pinned with a notification" in t for t in tg.texts())
-    # The confirmation is only for the admin, so it deletes after 15 seconds like other confirmations.
-    # Two deletes are scheduled: the /feedon command itself and the confirmation.
+    # The confirmation is only for the admin, so it goes to them privately. The only thing
+    # left to clean up in the group is the /feedon command itself.
+    confirm = [p for p in tg.of("sendMessage") if "X feed on" in p["text"]]
+    assert len(confirm) == 1 and int(confirm[0]["chat_id"]) == ADMIN["id"]
     waits = [r[0] - time.time() for r in db.conn.execute("SELECT delete_at FROM scheduled_deletes")]
-    assert len(waits) == 2 and all(0 < w <= 15 for w in waits)
+    assert len(waits) == 1 and 0 < waits[0] <= 5
     h.x.timeline += [Post("1005", "Pin me", 0.0, None, "post"),
                      Post("1006", "Pin me too", 0.0, "https://pbs.twimg.com/media/y.jpg", "post")]
     db.conn.execute("UPDATE feeds SET last_checked_at = 0")

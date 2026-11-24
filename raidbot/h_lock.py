@@ -9,7 +9,7 @@ from telegram.error import TelegramError
 from telegram.ext import ContextTypes
 
 from . import core
-from .common import get_db, get_x, is_admin, is_group, reply_temp, safe_delete
+from .common import get_db, get_x, is_admin, is_group, safe_delete, tell_admin
 from .utils import format_duration, parse_duration
 
 log = logging.getLogger(__name__)
@@ -31,24 +31,24 @@ async def lock_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     db = get_db(context)
     args = context.args or []
     if len(args) != 2 or not args[0].isdigit() or int(args[0]) < 1:
-        await reply_temp(context, msg, USAGE)
+        await tell_admin(context, msg, USAGE)
         return
     target = int(args[0])
     duration = parse_duration(args[1])
     if not duration:
-        await reply_temp(context, msg, "I didn't understand the time. Use something like 60m or 2h (max 24h).")
+        await tell_admin(context, msg, "I didn't understand the time. Use something like 60m or 2h (max 24h).")
         return
     if db.active_lock(msg.chat_id):
-        await reply_temp(context, msg, "The chat is already locked. Use /raidunlock first.")
+        await tell_admin(context, msg, "The chat is already locked. Use /raidunlock first.")
         return
     raids = db.active_raids(msg.chat_id)
     if not raids:
-        await reply_temp(context, msg, "There's no live raid. Start one with @raidall first.")
+        await tell_admin(context, msg, "There's no live raid. Start one with @raidall first.")
         return
     raid = raids[-1]  # the most recent live raid
     have = db.engagement_count(raid["id"])
     if have >= target:
-        await reply_temp(context, msg, f"Raid #{raid['raid_no']} already has {have} comments, so there's nothing to lock for.")
+        await tell_admin(context, msg, f"Raid #{raid['raid_no']} already has {have} comments, so there's nothing to lock for.")
         return
 
     try:
@@ -59,7 +59,7 @@ async def lock_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
     except TelegramError as e:
         log.warning("Couldn't lock chat %s: %s", msg.chat_id, e)
-        await reply_temp(context, msg, "I couldn't lock the chat. Give me the 'Ban users' admin right and try again.")
+        await tell_admin(context, msg, "I couldn't lock the chat. Give me the 'Ban users' admin right and try again.")
         return
 
     lock = db.create_lock(msg.chat_id, raid["id"], target, duration, prev)
@@ -86,7 +86,7 @@ async def unlock_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         return
     lock = get_db(context).active_lock(msg.chat_id)
     if not lock:
-        await reply_temp(context, msg, "The chat isn't locked.")
+        await tell_admin(context, msg, "The chat isn't locked.")
         return
     await finish_lock(context, lock, "unlocked by an admin")
 
