@@ -65,11 +65,12 @@ Status: built. Hosting will be decided next. Every command is explained in COMMA
 - The /register button deletes as soon as someone opens the bot through it, or after 15 seconds.
 - Setup prompts and the admin's template message are deleted once a template is saved.
 - The lock notice is removed when the chat unlocks.
-- Kept: the pinned raid message, summaries, and the weekly leaderboard.
+- A "Chat unlocked" summary is removed when the raid's final summary is posted, since the final one has the full results.
+- Kept: the pinned raid message, the final raid summary, and the weekly leaderboard.
 
 ## 5. Tracking (X API)
 
-- While a raid is live, the bot checks the post's replies every 2 minutes (`TRACK_INTERVAL_MINUTES`). X bills per post returned, and each reply is fetched only once, so frequent checks shouldn't add cost. Confirm this on the X Developer Console after the first real raid.
+- While a raid is live, the bot checks the post's replies every minute (`TRACK_INTERVAL_MINUTES`, also every minute while the chat is locked, `LOCK_CHECK_INTERVAL_MINUTES`). X bills per post returned, and each reply is fetched only once, so frequent checks shouldn't add cost. Confirm this on the X Developer Console after the first real raid.
 - Replies are matched to members by X account ID only; the search doesn't ask X for author profiles, which may be billed as user reads. Members who registered before the X key was set get their ID looked up once.
 - The post author's name for `{xname}` comes from X's free embed service first; the paid API is only used if that fails.
 - Only registered members count. Replies from outsiders are ignored.
@@ -86,6 +87,7 @@ Status: built. Hosting will be decided next. Every command is explained in COMMA
 ## 7. Summaries
 
 - Posted when a lock ends, whatever ended it, and when a raid ends.
+- When the raid ends, its "Chat unlocked" summaries are deleted and only the final raid summary stays.
 - Contents: how many commented, the fastest commenters, and who missed it.
 - Names in summaries and leaderboards are written without @, so they don't ping people again.
 
@@ -93,7 +95,10 @@ Status: built. Hosting will be decided next. Every command is explained in COMMA
 
 - `/raidcsv` gets the latest raid, `/raidcsv 3` gets a specific raid, and `/raidcsv all` gets every raid.
 - The bot deletes the command from the group and sends the file to the admin in a private chat. Each admin presses Start on the bot once.
-- Columns: Telegram username, X handle, Verona address, raided yes/no, reply link, reply time, time after raid start.
+- Layout: the raid number, raid link and start time are listed once at the top of the file. Below them is one row per member.
+- Member columns: Telegram username, link to their X profile, Verona address, registered yes/no, raided yes/no, reply link, reply time, time after raid start.
+- People with no Telegram username show their Telegram display name instead.
+- `/raidcsv all` repeats this block for each raid, with an empty row between raids.
 
 ## 9. Leaderboard
 
@@ -103,13 +108,13 @@ Status: built. Hosting will be decided next. Every command is explained in COMMA
   - a streak counts consecutive raids joined
 - Weeks run Monday to Sunday, UTC. The leaderboard is posted in the group automatically every Monday.
 - `/leaderboard` shows the current week.
-- Admins privately get a CSV of the top 5 with Verona addresses, for rewards.
+- Admins privately get a CSV of the top 5 with Verona addresses, for rewards. Its columns: rank, Telegram username, link to their X profile, Verona address, points, raids joined, fast bonuses, streak.
 
 ## 10. X feed
 
 - `/feedon VeronaOfficial` (admin): posts that account's new X posts into the group. `all` at the end also includes replies and reposts.
 - `/feedoff VeronaOfficial` stops it, `/feeds` lists what's on. Any number of accounts and groups.
-- Starts from the newest post, checks every 5 minutes (`FEED_INTERVAL_MINUTES`), sends images when a post has one, and caps at 10 posts per check so a long outage doesn't flood the chat.
+- Starts from the newest post, checks every minute (`FEED_INTERVAL_MINUTES`). A check that finds no new posts costs nothing, sends images when a post has one, and caps at 10 posts per check so a long outage doesn't flood the chat.
 - One X request per account per check, even when several groups follow the same account.
 - Needs the X API key.
 

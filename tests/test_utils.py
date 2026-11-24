@@ -126,7 +126,23 @@ def test_reply_search_asks_for_no_author_profiles():
 def test_default_check_intervals(monkeypatch):
     from raidbot.config import load_config
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "x" * 10)  # placeholder, not a token
-    for name in ("TRACK_INTERVAL_MINUTES", "LOCK_CHECK_INTERVAL_MINUTES", "FEED_INTERVAL_MINUTES"):
+    for name in ("X_BEARER_TOKEN", "TRACK_INTERVAL_MINUTES", "LOCK_CHECK_INTERVAL_MINUTES", "FEED_INTERVAL_MINUTES"):
         monkeypatch.delenv(name, raising=False)
     cfg = load_config()
-    assert cfg.track_interval == 120 and cfg.lock_check_interval == 120 and cfg.feed_interval == 300
+    assert cfg.track_interval == 60 and cfg.lock_check_interval == 60 and cfg.feed_interval == 60
+
+
+def test_config_repr_hides_secrets(monkeypatch):
+    from raidbot.config import load_config
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "tg-placeholder-123")  # placeholders, not tokens
+    monkeypatch.setenv("X_BEARER_TOKEN", "x-placeholder-456")
+    text = repr(load_config())
+    assert "tg-placeholder-123" not in text and "x-placeholder-456" not in text
+
+
+def test_checks_are_due_despite_small_timing_drift():
+    from raidbot.utils import is_due
+    # The job wakes every 60s; a check finished at 0.8s must still run at the next wake-up.
+    assert is_due(0.8, 60, 60.0)
+    assert not is_due(0.0, 60, 30.0)
+    assert not is_due(0.0, 300, 240.0) and is_due(0.0, 300, 295.0)

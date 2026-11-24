@@ -55,11 +55,12 @@ FOR ADMINS: TAGGING AND RAIDS
       2. the message you're replying to
       3. the last X link you posted in the group (within 24 hours)
     A raid lasts 12 hours. While it runs, the bot checks the post's replies
-    every 2 minutes and counts comments from registered members only.
+    every minute and counts comments from registered members only.
     @allraid, /raidall and /allraid do the same thing.
 
 /endraid
-    Ends a raid early and posts the summary.
+    Ends a raid early and posts the summary. Any "Chat unlocked" summary from
+    that raid is deleted then, so only the final summary stays.
     If more than one raid is running, the bot shows buttons so you can pick which one.
 
 /raidlock 15 60m
@@ -67,7 +68,7 @@ FOR ADMINS: TAGGING AND RAIDS
     commented on the latest raid, or until 60 minutes pass, whichever comes first.
     Pick any numbers, for example /raidlock 10 30m, /raidlock 20 2h, /raidlock 30 90m.
     Only works while a raid is running. The bot checks for comments every
-    2 minutes. The group's normal permissions come back exactly as they were.
+    minute. The group's normal permissions come back exactly as they were.
 
 /raidunlock
     Unlocks the chat early.
@@ -80,7 +81,7 @@ Posts from any X account show up in the group automatically. Needs the X API key
 /feedon VeronaOfficial
     Starts posting that account's new X posts in this group. You can also use
     @VeronaOfficial or the profile link. It starts from now, so old posts
-    aren't dumped in. The bot checks every 5 minutes. Posts with an image are
+    aren't dumped in. The bot checks every minute. Posts with an image are
     sent with the image. Replies and reposts are left out.
 
 /feedon VeronaOfficial all
@@ -169,14 +170,17 @@ Press Start on @raids_bot once so it can message you.
 /raidcsv all
     CSV of every raid in one file.
 
-    Columns: raid number, raid link, start time, Telegram username, Telegram name,
-    X handle, Verona address, registered, raided, reply link, reply time,
-    time after raid start.
+    The raid number, raid link and start time are listed once at the top.
+    Below that is one row per member with these columns: Telegram username,
+    X profile link, Verona address, registered, raided, reply link,
+    reply time, time after raid start.
+    People with no Telegram username show their Telegram name instead.
+    With /raidcsv all, each raid gets its own block, with an empty row between.
 
 Weekly leaderboard
     Posted in the group automatically every Monday (UTC).
     Every admin who has pressed Start on the bot also gets a private CSV of the
-    top 5, with their Verona addresses, for sending rewards.
+    top 5, with their X profile links and Verona addresses, for sending rewards.
 
 
 KEEPING THE CHAT CLEAN
@@ -192,9 +196,11 @@ KEEPING THE CHAT CLEAN
 - The /settemplate and /setgreet prompts, and the message you sent with the
   template, are deleted once it's saved. You get a preview for 1 minute instead.
 - The "Chat locked" notice is removed when the chat unlocks.
+- The "Chat unlocked" summary is removed when the raid ends and its final
+  summary is posted.
 - Tag messages delete after 4 hours. Welcome messages delete when the person
   registers, or after 24 hours.
-- What stays: the pinned raid message, raid and lock summaries, and the weekly
+- What stays: the pinned raid message, the final raid summary, and the weekly
   leaderboard.
 
 
@@ -202,5 +208,6 @@ AUTOMATIC THINGS
 ----------------
 - Raid summary when a raid ends: how many commented, the fastest, and who missed it.
 - Lock summary when a lock ends, whether the target was reached, time ran out or an admin unlocked.
+  It stays until the raid ends, then the final raid summary replaces it.
 - Welcome message for new members, with a Register button.
 - New members are added to the tag list automatically, and people who leave are removed.

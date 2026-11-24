@@ -15,10 +15,12 @@ from telegram.ext import ContextTypes
 from . import core
 from .common import (
     MEDIUM, delete_later, get_cfg, get_db, get_x, is_admin, is_group, message_links, reply_temp,
-    send_temp, sender_key,
+    safe_delete, send_temp, sender_key,
 )
 from .db import DEFAULT_TEMPLATE
-from .utils import X_STATUS_RE, format_duration, handle_from_post_url, render_template, valid_template_name
+from .utils import (
+    X_STATUS_RE, format_duration, handle_from_post_url, is_due, render_template, valid_template_name,
+)
 from .xapi import XApiError, XRateLimited, oembed_author
 
 log = logging.getLogger(__name__)
@@ -271,7 +273,7 @@ async def tracking_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     for raid in db.active_raids():
         lock = db.lock_for_raid(raid["id"])
         interval = cfg.lock_check_interval if lock else cfg.track_interval
-        if time.time() - raid["last_checked_at"] < interval:
+        if not is_due(raid["last_checked_at"], interval, time.time()):
             continue
         try:
             await poll_raid(context, raid)
@@ -314,6 +316,11 @@ async def end_raid(context: ContextTypes.DEFAULT_TYPE, raid, reason: str) -> Non
         )
     except TelegramError as e:
         log.warning("Couldn't post the raid summary in chat %s: %s", raid["chat_id"], e)
+        return
+    # The final summary replaces any "Chat unlocked" summaries posted during the raid.
+    for done in db.lock_summaries_for_raid(raid["id"]):
+        await safe_delete(context, raid["chat_id"], done["summary_message_id"])
+        db.set_lock_summary(done["id"], None)
 
 
 async def endraid_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

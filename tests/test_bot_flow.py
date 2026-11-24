@@ -297,6 +297,8 @@ async def _full_raid_flow(tmp_path):
     summary = tg.texts()[-1]
     assert "Chat unlocked: target reached" in summary and "Commented: 2 of 2" in summary
     assert db.active_lock(CHAT["id"]) is None
+    unlock_summary_id = db.lock_summaries_for_raid(raid["id"])[0]["summary_message_id"]
+    assert unlock_summary_id
 
     # 9. /raidcsv: command deleted from the group, file sent privately to the admin.
     tg.clear()
@@ -306,7 +308,8 @@ async def _full_raid_flow(tmp_path):
     docs = tg.of("sendDocument")
     assert len(docs) == 1 and int(docs[0]["chat_id"]) == ADMIN["id"]
     csv_text = b"".join(f if isinstance(f, bytes) else b"" for f in tg.files).decode("utf-8-sig", "ignore")
-    assert "AliceX" in csv_text and wallet(1) in csv_text and "1m 15s" in csv_text
+    assert "https://x.com/AliceX" in csv_text and wallet(1) in csv_text and "1m 15s" in csv_text
+    assert csv_text.count(POST) == 1  # the raid link is listed once, not on every row
 
     # 10. A second raid can run alongside; /endraid then asks which one.
     db.set_group(CHAT["id"], "last_tag_at", 0)
@@ -318,6 +321,9 @@ async def _full_raid_flow(tmp_path):
     await h.press(ADMIN, f"endraid:{raid['id']}", CHAT)
     assert db.get_raid(raid["id"])["status"] == "ended"
     assert any("Raid #1 is over" in t for t in tg.texts())
+    # The final summary replaces the earlier "Chat unlocked" summary.
+    assert unlock_summary_id in [int(p["message_id"]) for p in tg.of("deleteMessage")]
+    assert db.lock_summaries_for_raid(raid["id"]) == []
 
     # 11. Raids end on their own after 12 hours.
     db.conn.execute("UPDATE raids SET ends_at = 0 WHERE status = 'active'")

@@ -245,3 +245,12 @@ def handle_from_post_url(url: str) -> str | None:
     m = X_STATUS_RE.search(url or "")
     user = m.group("user") if m else None
     return user if user and user.lower() != "i" else None
+
+
+# The check jobs wake every 60 seconds. A check counts as due a little early so
+# small timing drift doesn't push a 1 minute check out to 2 minutes.
+DUE_SLACK_SECONDS = 10
+
+
+def is_due(last_checked_at: float, interval: int, now: float) -> bool:
+    return now - last_checked_at >= interval - DUE_SLACK_SECONDS

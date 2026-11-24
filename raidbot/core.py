@@ -171,18 +171,33 @@ def leaderboard_html(rows: list[dict], start: float, title: str, limit: int = 10
 # ---------------------------------------------------------------- CSV
 
 RAID_CSV_HEADER = [
-    "raid_no", "raid_link", "raid_started_utc", "telegram_username", "telegram_name",
-    "x_handle", "verona_address", "registered", "raided", "reply_link",
-    "reply_time_utc", "time_after_start",
+    "telegram_username", "x_profile", "verona_address", "registered", "raided",
+    "reply_link", "reply_time_utc", "time_after_start",
 ]
 
 
+def x_profile_link(handle: str | None) -> str:
+    return f"https://x.com/{handle}" if handle else ""
+
+
+def telegram_label(username: str | None, name: str | None) -> str:
+    """The Telegram username, or the display name for people who don't have one."""
+    return username or name or ""
+
+
 def raid_csv(db: Database, chat_id: int, raids) -> bytes:
+    """One block per raid: the raid's details once at the top, then a row per member."""
     members = db.list_members(chat_id)
     buf = io.StringIO()
     w = csv.writer(buf)
-    w.writerow(RAID_CSV_HEADER)
-    for raid in raids:
+    for i, raid in enumerate(raids):
+        if i:
+            w.writerow([])
+        w.writerow(["raid_no", raid["raid_no"]])
+        w.writerow(["raid_link", csv_safe(raid["url"])])
+        w.writerow(["raid_started_utc", utc_str(raid["started_at"])])
+        w.writerow([])
+        w.writerow(RAID_CSV_HEADER)
         engaged = {e["user_id"]: e for e in db.engagements(raid["id"])}
         seen = set()
         people = []
@@ -195,8 +210,7 @@ def raid_csv(db: Database, chat_id: int, raids) -> bytes:
         for uid, username, name, x_handle, wallet, registered in people:
             e = engaged.get(uid) if uid is not None else None
             w.writerow([csv_safe(v) for v in (
-                raid["raid_no"], raid["url"], utc_str(raid["started_at"]),
-                username or "", name or "", x_handle or "", wallet or "",
+                telegram_label(username, name), x_profile_link(x_handle), wallet or "",
                 "yes" if registered else "no",
                 "yes" if e else "no",
                 e["reply_url"] if e else "",
@@ -209,11 +223,11 @@ def raid_csv(db: Database, chat_id: int, raids) -> bytes:
 def top_csv(rows: list[dict], limit: int = 5) -> bytes:
     buf = io.StringIO()
     w = csv.writer(buf)
-    w.writerow(["rank", "telegram_username", "telegram_name", "x_handle", "verona_address",
+    w.writerow(["rank", "telegram_username", "x_profile", "verona_address",
                 "points", "raids_joined", "fast_bonuses", "streak"])
     for i, s in enumerate(rows[:limit], 1):
         w.writerow([csv_safe(v) for v in (
-            i, s["username"] or "", s["name"] or "", s["x_handle"] or "", s["wallet"] or "",
+            i, telegram_label(s["username"], s["name"]), x_profile_link(s["x_handle"]), s["wallet"] or "",
             s["points"], s["raids"], s["fast"], s["streak"],
         )])
     return buf.getvalue().encode("utf-8-sig")

@@ -74,7 +74,42 @@ def test_record_replies_only_registered_group_members(tmp_path):
     assert "Commented: 2 of 2" in text and "alice, 1m 00s" in text
 
     data = core.raid_csv(db, CHAT, [raid]).decode("utf-8-sig")
-    assert "AliceX" in data and wallet(1) in data and "1m 00s" in data
+    assert "https://x.com/AliceX" in data and wallet(1) in data and "1m 00s" in data
+
+
+def test_raid_csv_layout(tmp_path):
+    import csv
+    import io
+    db = setup_db(tmp_path)
+    db.upsert_user_profile(1, "alice", "Alice")
+    db.upsert_member(CHAT, 1, "alice", "Alice")
+    db.register_user(1, "alice", "Alice", "AliceX", "111", wallet(1))
+    db.upsert_member(CHAT, 2, None, "Carol")  # no Telegram username, not registered
+    r1 = db.create_raid(CHAT, "501", "https://x.com/p/status/501", 1, 3600, 10)
+    r2 = db.create_raid(CHAT, "502", "https://x.com/p/status/502", 1, 3600, 11)
+    db.add_engagement(r1["id"], 1, "https://x.com/AliceX/status/9", "alice", r1["started_at"] + 90)
+
+    rows = list(csv.reader(io.StringIO(core.raid_csv(db, CHAT, [r1]).decode("utf-8-sig"))))
+    # Raid details appear once at the top, not on every row.
+    assert rows[0] == ["raid_no", str(r1["raid_no"])]
+    assert rows[1] == ["raid_link", "https://x.com/p/status/501"]
+    assert rows[2][0] == "raid_started_utc" and rows[2][1].endswith("UTC")
+    assert rows[3] == []
+    assert rows[4] == core.RAID_CSV_HEADER
+    assert "telegram_name" not in rows[4] and "x_handle" not in rows[4] and "x_profile" in rows[4]
+    people = {r[0]: r for r in rows[5:]}
+    assert people["alice"][1] == "https://x.com/AliceX" and people["alice"][4] == "yes"
+    assert people["alice"][7] == "1m 30s"
+    assert people["Carol"][1] == "" and people["Carol"][3] == "no"  # display name when no username
+    assert len(rows) == 7
+
+    # /raidcsv all: one block per raid, separated by a blank row.
+    text = core.raid_csv(db, CHAT, [r1, r2]).decode("utf-8-sig")
+    rows = list(csv.reader(io.StringIO(text)))
+    assert [r for r in rows if r and r[0] == "raid_no"] == [["raid_no", str(r1["raid_no"])],
+                                                            ["raid_no", str(r2["raid_no"])]]
+    assert rows[7] == [] and rows[8] == ["raid_no", str(r2["raid_no"])]
+    assert text.count("https://x.com/p/status/50") == 2
 
 
 def test_leaderboard_points_and_streaks(tmp_path):
@@ -97,6 +132,8 @@ def test_leaderboard_points_and_streaks(tmp_path):
     assert rows[1]["points"] == 3 and rows[1]["streak"] == 1
     top = core.top_csv(rows).decode("utf-8-sig")
     assert wallet(1) in top and top.count("\n") == 3
+    assert top.startswith("rank,telegram_username,x_profile,verona_address,")
+    assert "https://x.com/x1" in top
 
 
 def test_old_single_template_becomes_default(tmp_path):

@@ -117,6 +117,9 @@ async def finish_lock(context: ContextTypes.DEFAULT_TYPE, lock, reason: str, pos
     else:
         text = f"<b>Chat unlocked:</b> {reason}."
     try:
-        await context.bot.send_message(chat_id, text, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
+        sent = await context.bot.send_message(chat_id, text, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
     except TelegramError as e:
         log.warning("Couldn't post unlock message in chat %s: %s", chat_id, e)
+        return
+    if post_summary and raid:
+        db.set_lock_summary(lock["id"], sent.message_id)  # removed when the raid's final summary is posted

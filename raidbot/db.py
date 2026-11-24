@@ -145,6 +145,8 @@ class Database:
         lock_cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(locks)")}
         if "message_id" not in lock_cols:
             self.conn.execute("ALTER TABLE locks ADD COLUMN message_id INTEGER")
+        if "summary_message_id" not in lock_cols:
+            self.conn.execute("ALTER TABLE locks ADD COLUMN summary_message_id INTEGER")
         # Single templates from the first version become the "default" template.
         self.conn.execute(
             "INSERT OR IGNORE INTO templates(chat_id, name, body_html, photo_file_id, updated_at) "
@@ -502,6 +504,15 @@ class Database:
 
     def set_lock_message(self, lock_id: int, message_id: int) -> None:
         self._run("UPDATE locks SET message_id = ? WHERE id = ?", (message_id, lock_id))
+
+    def set_lock_summary(self, lock_id: int, message_id: int | None) -> None:
+        self._run("UPDATE locks SET summary_message_id = ? WHERE id = ?", (message_id, lock_id))
+
+    def lock_summaries_for_raid(self, raid_id: int) -> list[sqlite3.Row]:
+        """Finished locks of a raid whose "Chat unlocked" summary is still in the chat."""
+        return self._all(
+            "SELECT * FROM locks WHERE raid_id = ? AND active = 0 AND summary_message_id IS NOT NULL", (raid_id,)
+        )
 
     def lock_for_raid(self, raid_id: int) -> sqlite3.Row | None:
         return self._one("SELECT * FROM locks WHERE raid_id = ? AND active = 1", (raid_id,))

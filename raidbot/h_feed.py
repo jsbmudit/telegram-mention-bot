@@ -15,7 +15,7 @@ from telegram.error import TelegramError
 from telegram.ext import ContextTypes
 
 from .common import MEDIUM, get_cfg, get_db, get_x, is_admin, is_group, reply_temp
-from .utils import format_duration, normalize_x_handle
+from .utils import format_duration, is_due, normalize_x_handle
 from .xapi import Post, XApiError, XRateLimited
 
 log = logging.getLogger(__name__)
@@ -57,7 +57,8 @@ async def feedon_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     since = max((p.id for p in latest), key=int, default=None)
     get_db(context).add_feed(msg.chat_id, user["id"], user["username"], user["name"], mode, since)
     what = "posts, replies and reposts" if mode == "all" else "posts"
-    every = format_duration(get_cfg(context).feed_interval)
+    interval = get_cfg(context).feed_interval
+    every = "minute" if interval == 60 else format_duration(interval)
     await reply_temp(
         context, msg,
         f"X feed on: new {what} from <b>{html.escape(user['name'] or user['username'])}</b> "
@@ -139,7 +140,7 @@ async def feed_job(context: ContextTypes.DEFAULT_TYPE) -> None:
 
     for x_user_id, feeds in by_account.items():
         now = time.time()
-        if now - min(f["last_checked_at"] for f in feeds) < cfg.feed_interval:
+        if not is_due(min(f["last_checked_at"] for f in feeds), cfg.feed_interval, now):
             continue
         # One request per account, even if several groups follow it.
         known = [f["since_id"] for f in feeds]

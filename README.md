@@ -28,9 +28,9 @@ The bot reads its secrets from environment variables only. Never put them in fil
 | `TELEGRAM_BOT_TOKEN` | yes | The bot token from BotFather |
 | `X_BEARER_TOKEN` | for tracking | X API bearer token. Without it, raids work but comments aren't tracked |
 | `DB_PATH` | no | Where to keep the database (default `raidbot.db`) |
-| `TRACK_INTERVAL_MINUTES` | no | How often to check replies during a raid (default 2) |
-| `LOCK_CHECK_INTERVAL_MINUTES` | no | How often to check replies while the chat is locked (default 2) |
-| `FEED_INTERVAL_MINUTES` | no | How often to check followed X accounts for new posts (default 5) |
+| `TRACK_INTERVAL_MINUTES` | no | How often to check replies during a raid (default 1) |
+| `LOCK_CHECK_INTERVAL_MINUTES` | no | How often to check replies while the chat is locked (default 1) |
+| `FEED_INTERVAL_MINUTES` | no | How often to check followed X accounts for new posts (default 1) |
 
 ```bash
 python3 -m venv .venv
@@ -57,6 +57,12 @@ X bills per post returned ($0.005 per post read at the time of writing), not per
 fetched once, so a raid costs about $0.005 times the number of replies the post gets. A `/register`
 costs one profile read ($0.01). An X feed costs $0.005 per new post. Check the X Developer Console
 after the first real raid to confirm.
+
+Checking every minute doesn't cost more. A check that finds nothing new returns no posts, so it isn't
+billed. It still shows up under Requests in the X Developer Console, which counts every call, billed or
+not. X allows 450 reply searches and 10,000 timeline reads per 15 minutes. Each live raid and each feed
+uses about 15 calls in that time, so the bot stays far below those limits. If a limit is ever hit, the
+bot pauses its X checks until X allows them again.
 
 ## Tests
 

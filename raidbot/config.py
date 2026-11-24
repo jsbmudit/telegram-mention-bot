@@ -1,7 +1,7 @@
 """Settings, read from environment variables only. Secrets never live in files."""
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
@@ -11,12 +11,13 @@ class MissingTokenError(Exception):
 
 @dataclass(frozen=True)
 class Config:
-    telegram_token: str
-    x_bearer_token: str | None
+    # repr=False keeps the secrets out of error messages and logs that print the config.
+    telegram_token: str = field(repr=False)
+    x_bearer_token: str | None = field(repr=False)
     db_path: str
     track_interval: int  # seconds between reply checks for a normal raid
     lock_check_interval: int  # seconds between reply checks while the chat is locked
-    feed_interval: int = 5 * 60  # seconds between checks for new posts from followed X accounts
+    feed_interval: int = 60  # seconds between checks for new posts from followed X accounts
     raid_duration: int = 12 * 3600
     tag_cooldown: int = 15 * 60
     tag_delete_after: int = 4 * 3600
@@ -63,9 +64,9 @@ def load_config() -> Config:
         telegram_token=token,
         x_bearer_token=x_token,
         db_path=os.environ.get("DB_PATH", "").strip() or "raidbot.db",
-        track_interval=max(60, _int_env("TRACK_INTERVAL_MINUTES", 2) * 60),
-        lock_check_interval=max(60, _int_env("LOCK_CHECK_INTERVAL_MINUTES", 2) * 60),
-        feed_interval=max(60, _int_env("FEED_INTERVAL_MINUTES", 5) * 60),
+        track_interval=max(60, _int_env("TRACK_INTERVAL_MINUTES", 1) * 60),
+        lock_check_interval=max(60, _int_env("LOCK_CHECK_INTERVAL_MINUTES", 1) * 60),
+        feed_interval=max(60, _int_env("FEED_INTERVAL_MINUTES", 1) * 60),
     )
 
 
