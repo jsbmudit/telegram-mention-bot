@@ -128,6 +128,20 @@ Status: built. Hosting will be decided next. Every command is explained in COMMA
 - One X request per account per check, even when several groups follow the same account.
 - Needs the X API key.
 
+## 10b. Backups
+
+- The bot's owner is set with `BOT_OWNER_ID`. Only the owner gets backups or can run `/backup`, because a backup
+  holds every group's data.
+- Once a day (`BACKUP_INTERVAL_HOURS`), the bot sends the whole database file to the owner in a private chat,
+  with a short summary: number of groups, registered people, raids, templates and feeds.
+- `/backup` sends one right away. In a private chat it answers there. In a group the command is removed and the
+  file still goes to the owner privately; nothing is posted in the group.
+- Someone who isn't the owner gets "Only the bot's owner can use /backup." If no owner is set, `/backup` replies
+  with the sender's Telegram ID so the owner can set it.
+- The copy is made with SQLite's backup feature, so it's consistent while the bot runs. Restoring means putting
+  the file at `DB_PATH` (and removing old `-wal`/`-shm` files) before starting the bot.
+- If the owner can't be reached (they never pressed Start), the bot tries again an hour later.
+
 ## 11. Command names
 
 - Chosen so they don't clash with Rose: `/raidlock`, `/raidunlock`, `/greet`, `/setgreet`, `/raidhelp`.

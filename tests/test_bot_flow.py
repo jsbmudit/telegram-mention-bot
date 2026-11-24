@@ -675,3 +675,89 @@ async def _cost_savers(tmp_path):
     assert h.x.user_lookups == lookups  # not looked up again
 
     await h.app.shutdown()
+
+
+def test_backups(tmp_path):
+    asyncio.run(_backups(tmp_path))
+
+
+async def _backups(tmp_path):
+    import dataclasses
+    from raidbot.h_backup import LAST_BACKUP_KEY, backup_job
+
+    h = Harness(tmp_path)
+    tg, db = h.tg, h.db
+    await h.start()
+    chat_id = CHAT["id"]
+    # Some data worth keeping: a member, a registration, a template and a welcome message.
+    await h.send(ADMIN, "/addusers @alice")
+    await h.send(ALICE, "gm")
+    await h.register(ALICE, "alicex", wallet(1))
+    db.save_template(chat_id, "default", "RAID {link}", None)
+    db.set_group(chat_id, "welcome_html", "Hi {name}")
+
+    # No owner set: /backup tells the person their ID so they can set it, and sends nothing.
+    tg.clear()
+    tg.files.clear()
+    await h.dm(ADMIN, "/backup")
+    assert any(f"BOT_OWNER_ID={ADMIN['id']}" in t for t in tg.texts()) and tg.of("sendDocument") == []
+    await backup_job(h.ctx)
+    assert tg.of("sendDocument") == []  # automatic backups are off too
+
+    h.app.bot_data["cfg"] = dataclasses.replace(h.app.bot_data["cfg"], owner_id=ADMIN["id"])
+
+    # Someone else can't get a backup.
+    tg.clear()
+    await h.dm(ALICE, "/backup")
+    assert any("Only the bot's owner" in t for t in tg.texts()) and tg.of("sendDocument") == []
+    # /backup in a group: the command is removed, nothing is posted there, and only the owner
+    # gets the file, privately.
+    await h.send(ALICE, "/backup")
+    assert tg.of("sendDocument") == [] and _scheduled(db, h.last_id)
+    tg.files.clear()
+    await h.send(ADMIN, "/backup")
+    assert _scheduled(db, h.last_id)
+    docs = tg.of("sendDocument")
+    assert len(docs) == 1 and int(docs[0]["chat_id"]) == ADMIN["id"]
+    assert all(int(p["chat_id"]) != chat_id for p in tg.of("sendMessage") + docs)
+    tg.clear()
+
+    # The owner gets the database file privately, with a short summary.
+    await h.dm(ADMIN, "/backup")
+    docs = tg.of("sendDocument")
+    assert len(docs) == 1 and int(docs[0]["chat_id"]) == ADMIN["id"]
+    assert "Registered people: 1" in docs[0]["caption"] and "Templates: 1" in docs[0]["caption"]
+    data = next(f for f in tg.files if isinstance(f, bytes) and f.startswith(b"SQLite format 3"))
+
+    # It just ran, so the automatic one isn't due yet.
+    tg.clear()
+    await backup_job(h.ctx)
+    assert tg.of("sendDocument") == []
+    # Once a day has passed it is sent automatically, and only once.
+    db.set_state(LAST_BACKUP_KEY, str(time.time() - 25 * 3600))
+    await backup_job(h.ctx)
+    await backup_job(h.ctx)
+    docs = tg.of("sendDocument")
+    assert len(docs) == 1 and "Automatic backup" in docs[0]["caption"]
+
+    # If the owner can't be reached, it doesn't crash and waits an hour before trying again.
+    db.set_state(LAST_BACKUP_KEY, "0")
+    tg.blocked.add(ADMIN["id"])
+    tg.clear()
+    await backup_job(h.ctx)
+    await backup_job(h.ctx)
+    assert len(tg.of("sendDocument")) == 1  # one failed attempt, no retry straight away
+    assert db.get_state(LAST_BACKUP_KEY) == "0"
+    await h.app.shutdown()
+
+    # Restoring: a bot started on the backup file has everything back.
+    restored = tmp_path / "restored.db"
+    restored.write_bytes(data)
+    from raidbot.db import Database
+    db2 = Database(str(restored))
+    alice = db2.get_user(11)
+    assert alice["x_handle"] == "AliceX" and alice["wallet"] == wallet(1)
+    assert db2.get_template(chat_id, "default")["body_html"] == "RAID {link}"
+    assert db2.get_group(chat_id)["welcome_html"] == "Hi {name}"
+    assert any(m["user_id"] == 11 for m in db2.list_members(chat_id))
+    db2.close()

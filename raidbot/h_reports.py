@@ -157,7 +157,10 @@ Variables: {link} {xname} {xhandle} {xprofile}
 /greet: post the welcome message
 
 <b>Admins: reports</b> (sent to you privately)
-/raidcsv, /raidcsv 3, /raidcsv all"""
+/raidcsv, /raidcsv 3, /raidcsv all
+
+<b>Bot owner</b> (in a private chat with me)
+/backup: get a copy of all the bot's data now (it's also sent automatically every day)"""
 
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

@@ -192,6 +192,24 @@ Weekly leaderboard
     top 5, with their X profile links and Verona addresses, for sending rewards.
 
 
+FOR THE BOT OWNER: BACKUPS
+--------------------------
+The owner is whoever's Telegram ID is set as BOT_OWNER_ID on the server.
+
+/backup
+    Sends you a copy of all the bot's data right away: registrations,
+    members, templates, welcome messages, feeds, raids and leaderboards.
+    Use it in your private chat with the bot. If you type it in a group, the
+    command is removed and the file still comes to you privately.
+    Nobody else can use it. If no owner is set yet, it tells you your
+    Telegram ID so it can be set.
+
+Automatic backup
+    The same file is sent to you every day without asking.
+    Keep these files: if the server is ever lost, the newest one brings
+    everything back.
+
+
 KEEPING THE CHAT CLEAN
 ----------------------
 - Every bot command (/addusers, /raidlock, /raidunlock, /raidcsv and so on) is deleted

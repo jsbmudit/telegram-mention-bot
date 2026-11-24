@@ -1,7 +1,9 @@
 """SQLite storage. One connection, used from the bot's single event loop."""
 
 import sqlite3
+import tempfile
 import time
+from pathlib import Path
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS groups (
@@ -123,6 +125,12 @@ CREATE TABLE IF NOT EXISTS feeds (
     created_at      REAL NOT NULL,
     UNIQUE (chat_id, x_user_id)
 );
+
+-- Small bits of bot-wide state, such as when the last backup was sent.
+CREATE TABLE IF NOT EXISTS bot_state (
+    key   TEXT PRIMARY KEY,
+    value TEXT
+);
 """
 
 DEFAULT_TEMPLATE = "default"
@@ -161,6 +169,41 @@ class Database:
 
     def close(self) -> None:
         self.conn.close()
+
+    # ------------------------------------------------------------ backups
+
+    def backup_bytes(self) -> bytes:
+        """A complete copy of the database as a file's bytes.
+
+        Uses SQLite's own backup feature, so the copy is consistent even while
+        the bot is busy. The copy can be put at DB_PATH to restore everything.
+        """
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "backup.db"
+            dest = sqlite3.connect(path)
+            try:
+                self.conn.backup(dest)
+            finally:
+                dest.close()
+            return path.read_bytes()
+
+    def backup_stats(self) -> dict:
+        count = lambda sql: self.conn.execute(sql).fetchone()[0]  # noqa: E731
+        return {
+            "groups": count("SELECT COUNT(*) FROM groups"),
+            "registered": count("SELECT COUNT(*) FROM users WHERE registered_at IS NOT NULL"),
+            "raids": count("SELECT COUNT(*) FROM raids"),
+            "templates": count("SELECT COUNT(*) FROM templates"),
+            "feeds": count("SELECT COUNT(*) FROM feeds"),
+        }
+
+    def get_state(self, key: str) -> str | None:
+        row = self._one("SELECT value FROM bot_state WHERE key = ?", (key,))
+        return row["value"] if row else None
+
+    def set_state(self, key: str, value: str) -> None:
+        self._run("INSERT INTO bot_state(key, value) VALUES(?, ?) "
+                  "ON CONFLICT(key) DO UPDATE SET value = excluded.value", (key, value))
 
     def _one(self, sql: str, params=()) -> sqlite3.Row | None:
         return self.conn.execute(sql, params).fetchone()

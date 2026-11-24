@@ -23,6 +23,8 @@ class Config:
     tag_delete_after: int = 4 * 3600
     welcome_delete_after: int = 24 * 3600
     batch_size: int = 5
+    owner_id: int | None = None  # Telegram user ID of the bot's owner: gets backups and can run /backup
+    backup_interval: int = 24 * 3600  # seconds between automatic backups
 
 
 def load_dotenv(path: str = ".env") -> None:
@@ -67,6 +69,8 @@ def load_config() -> Config:
         track_interval=max(60, _int_env("TRACK_INTERVAL_MINUTES", 1) * 60),
         lock_check_interval=max(60, _int_env("LOCK_CHECK_INTERVAL_MINUTES", 1) * 60),
         feed_interval=max(60, _int_env("FEED_INTERVAL_MINUTES", 1) * 60),
+        owner_id=_int_env("BOT_OWNER_ID", 0) or None,
+        backup_interval=max(3600, _int_env("BACKUP_INTERVAL_HOURS", 24) * 3600),
     )
 
 

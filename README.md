@@ -33,6 +33,8 @@ The bot reads its secrets from environment variables only. Never put them in fil
 | `TRACK_INTERVAL_MINUTES` | no | How often to check replies during a raid (default 1) |
 | `LOCK_CHECK_INTERVAL_MINUTES` | no | How often to check replies while the chat is locked (default 1) |
 | `FEED_INTERVAL_MINUTES` | no | How often to check followed X accounts for new posts (default 1) |
+| `BOT_OWNER_ID` | recommended | Your Telegram user ID. You get the backups and can run `/backup`. Without it, automatic backups are off |
+| `BACKUP_INTERVAL_HOURS` | no | How often the automatic backup is sent (default 24, at most once an hour) |
 
 ```bash
 python3 -m venv .venv
@@ -52,6 +54,33 @@ For local testing you can put the variables in a `.env` file (see `.env.example`
 `.gitignore`, so it never gets pushed.
 
 The X API plan needs to include reading posts, user timelines and recent search. The Free plan can't read replies or timelines.
+
+## Backups
+
+Everything the bot knows is in one database file: registrations, member lists, templates, welcome messages,
+feeds, raids and leaderboards. If that file is lost, all of it has to be set up again.
+
+So the bot sends a copy of it to its owner on Telegram:
+
+- **Automatically, once a day** (`BACKUP_INTERVAL_HOURS`). The copy lives in your Telegram, not on the server,
+  so it survives even if the server or the hosting account is shut down.
+- **On demand** with `/backup`. Send it in your private chat with the bot (or in a group: the command is removed
+  and the file still comes to you privately). Handy before updating the bot.
+- **Only to the owner** set in `BOT_OWNER_ID`. A backup holds every group's data, including X handles and Verona
+  addresses, so it never goes to other admins or into a group.
+
+To find your Telegram ID, send `/backup` to the bot before `BOT_OWNER_ID` is set. It replies with your ID.
+Press Start on the bot once so it can message you. If it can't reach you, it tries again an hour later.
+
+The copy is made with SQLite's own backup feature, so it's complete and consistent even while the bot is busy.
+
+### Restoring a backup
+
+1. Stop the bot.
+2. Save the backup file at the path `DB_PATH` points to, for example `/opt/raidbot/data/raidbot.db`.
+3. Delete any `raidbot.db-wal` and `raidbot.db-shm` files next to it. They belong to the old database, and SQLite
+   could try to apply them to the restored one.
+4. Start the bot. Registrations, members, templates, welcome messages, feeds, raids and leaderboards are all back.
 
 ## X API cost
 

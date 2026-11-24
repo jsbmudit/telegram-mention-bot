@@ -13,6 +13,7 @@ from telegram.ext import (
 from .common import delete_later, get_db, is_group, safe_delete
 from .config import Config
 from .db import Database
+from .h_backup import backup_cmd, backup_job
 from .h_feed import feed_job, feedoff_cmd, feedon_cmd, feeds_cmd
 from .h_lock import finish_lock, lock_cmd, unlock_cmd
 from .h_members import (
@@ -63,7 +64,7 @@ PRIVATE_COMMANDS = [
 # Every command this bot answers in groups. These get removed from the chat
 # a few seconds after they're sent, so the group stays clean.
 OUR_GROUP_COMMANDS = {c.command for c in GROUP_COMMANDS} | {
-    "allraid", "cancel", "me", "deltemplate", "templates",
+    "allraid", "cancel", "me", "deltemplate", "templates", "backup",
 }
 
 
@@ -115,6 +116,8 @@ async def post_init(app: Application) -> None:
     log.info("Logged in as @%s", me.username)
     if app.bot_data.get("x") is None:
         log.warning("X_BEARER_TOKEN is not set: raids will run but comments won't be tracked.")
+    if not app.bot_data["cfg"].owner_id:
+        log.warning("BOT_OWNER_ID is not set: automatic backups are off.")
 
 
 async def post_shutdown(app: Application) -> None:
@@ -165,6 +168,7 @@ def build_app(cfg: Config, request=None, rate_limit: bool = True) -> Application
         app.add_handler(CommandHandler(name, fn, filters=groups))
     app.add_handler(CommandHandler("register", register_in_group, filters=groups))
     app.add_handler(CommandHandler("me", me_cmd, filters=private))
+    app.add_handler(CommandHandler("backup", backup_cmd, filters=private | groups))
     app.add_handler(CommandHandler("leaderboard", leaderboard_cmd))
     app.add_handler(CommandHandler("raidhelp", help_cmd))
     app.add_handler(CommandHandler("help", help_cmd, filters=private))  # no clash with other bots in private
@@ -181,6 +185,7 @@ def build_app(cfg: Config, request=None, rate_limit: bool = True) -> Application
     jq.run_repeating(tracking_job, interval=60, first=30, name="tracking")
     jq.run_repeating(feed_job, interval=60, first=45, name="feeds")
     jq.run_repeating(weekly_job, interval=3600, first=60, name="weekly")
+    jq.run_repeating(backup_job, interval=600, first=120, name="backup")
     return app
 
 

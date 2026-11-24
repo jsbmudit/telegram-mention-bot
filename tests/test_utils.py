@@ -146,3 +146,20 @@ def test_checks_are_due_despite_small_timing_drift():
     assert is_due(0.8, 60, 60.0)
     assert not is_due(0.0, 60, 30.0)
     assert not is_due(0.0, 300, 240.0) and is_due(0.0, 300, 295.0)
+
+
+def test_owner_and_backup_settings(monkeypatch):
+    from raidbot.config import load_config
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "x" * 10)  # placeholder, not a token
+    for name in ("BOT_OWNER_ID", "BACKUP_INTERVAL_HOURS"):
+        monkeypatch.delenv(name, raising=False)
+    cfg = load_config()
+    assert cfg.owner_id is None and cfg.backup_interval == 24 * 3600
+    monkeypatch.setenv("BOT_OWNER_ID", "123456789")
+    monkeypatch.setenv("BACKUP_INTERVAL_HOURS", "6")
+    cfg = load_config()
+    assert cfg.owner_id == 123456789 and cfg.backup_interval == 6 * 3600
+    monkeypatch.setenv("BOT_OWNER_ID", "not-a-number")
+    monkeypatch.setenv("BACKUP_INTERVAL_HOURS", "0")
+    cfg = load_config()
+    assert cfg.owner_id is None and cfg.backup_interval == 3600  # at most once an hour
