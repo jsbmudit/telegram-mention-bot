@@ -1,0 +1,221 @@
+"""/register: a short private chat that asks for the X account and Verona address."""
+
+import html
+import logging
+import time
+import warnings
+
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.constants import ParseMode
+from telegram.ext import (
+    CallbackQueryHandler, CommandHandler, ContextTypes, ConversationHandler, MessageHandler, filters,
+)
+
+from .common import bot_link, get_db, get_x, safe_delete
+from .utils import normalize_x_handle, validate_xion_address
+from .xapi import XApiError
+from telegram.warnings import PTBUserWarning
+
+# The confirm button is only ever pressed on the bot's own last message, so
+# per-message tracking isn't needed. Silence the library's generic warning.
+warnings.filterwarnings("ignore", message=r"If 'per_message=False'", category=PTBUserWarning)
+
+log = logging.getLogger(__name__)
+
+ASK_X, ASK_WALLET, CONFIRM = range(3)
+
+
+async def register_in_group(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/register typed in a group: point the person to a private chat with the bot."""
+    msg = update.effective_message
+    button = InlineKeyboardMarkup([[InlineKeyboardButton("Register", url=bot_link(context, "register"))]])
+    sent = await msg.reply_text(
+        "Tap the button to register in a private chat with me. It takes 30 seconds.",
+        reply_markup=button,
+    )
+    db = get_db(context)
+    later = time.time() + 5 * 60
+    db.schedule_delete(msg.chat_id, sent.message_id, later, "temp")
+    db.schedule_delete(msg.chat_id, msg.message_id, later, "temp")
+
+
+async def start_private(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    user = update.effective_user
+    get_db(context).upsert_user_profile(user.id, user.username, user.first_name)
+    if context.args and context.args[0] == "register":
+        return await begin(update, context)
+    await update.effective_message.reply_text(
+        "Hi! I run raids in your Telegram group.\n\n"
+        "Send /register to link your X account and Verona address so your raids get tracked.\n"
+        "Send /me to see what you registered.\n"
+        "Send /help for all commands."
+    )
+    return ConversationHandler.END
+
+
+async def begin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    user = update.effective_user
+    get_db(context).upsert_user_profile(user.id, user.username, user.first_name)
+    context.user_data.pop("reg", None)
+    await update.effective_message.reply_text(
+        "Let's get you registered.\n\n"
+        "<b>Step 1 of 2:</b> send your X username or profile link.\n"
+        "For example: @yourname or https://x.com/yourname\n\n"
+        "Send /cancel to stop.",
+        parse_mode=ParseMode.HTML,
+        disable_web_page_preview=True,
+    )
+    return ASK_X
+
+
+async def got_x(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    msg = update.effective_message
+    handle = normalize_x_handle(msg.text or "")
+    if not handle:
+        await msg.reply_text(
+            "That doesn't look like an X username. Send it like @yourname or https://x.com/yourname"
+        )
+        return ASK_X
+
+    x_user_id = None
+    x = get_x(context)
+    if x:
+        try:
+            found = await x.get_user(handle)
+        except XApiError as e:
+            log.warning("X lookup failed during registration: %s", e)
+            found = ("", handle)  # can't check right now, accept as typed
+        if found is None:
+            await msg.reply_text(f"I couldn't find @{handle} on X. Check the spelling and send it again.")
+            return ASK_X
+        x_user_id, handle = (found[0] or None), found[1]
+
+    owner = get_db(context).x_owner(handle, x_user_id)
+    if owner is not None and owner != update.effective_user.id:
+        await msg.reply_text(
+            f"@{handle} is already registered by someone else. If it's yours, ask an admin for help."
+        )
+        return ASK_X
+
+    context.user_data["reg"] = {"x_handle": handle, "x_user_id": x_user_id}
+    await msg.reply_text(
+        f"Got it: @{handle}\n\n<b>Step 2 of 2:</b> send your Verona address. It starts with xion1",
+        parse_mode=ParseMode.HTML,
+    )
+    return ASK_WALLET
+
+
+async def got_wallet(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    msg = update.effective_message
+    wallet = validate_xion_address(msg.text or "")
+    if not wallet:
+        await msg.reply_text(
+            "That isn't a valid Verona address. It should start with xion1. "
+            "Copy it again from your wallet and send it."
+        )
+        return ASK_WALLET
+    owner = get_db(context).wallet_owner(wallet)
+    if owner is not None and owner != update.effective_user.id:
+        await msg.reply_text("That address is already registered by someone else. Send a different one.")
+        return ASK_WALLET
+
+    reg = context.user_data.get("reg")
+    if not reg:
+        return await begin(update, context)
+    reg["wallet"] = wallet
+    buttons = InlineKeyboardMarkup([[
+        InlineKeyboardButton("Confirm", callback_data="reg:ok"),
+        InlineKeyboardButton("Start over", callback_data="reg:redo"),
+    ]])
+    await msg.reply_text(
+        "Please check your details:\n\n"
+        f"X: @{html.escape(reg['x_handle'])}\n"
+        f"Verona: <code>{html.escape(wallet)}</code>",
+        parse_mode=ParseMode.HTML,
+        reply_markup=buttons,
+    )
+    return CONFIRM
+
+
+async def confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    if query.data == "reg:redo":
+        await query.edit_message_reply_markup(None)
+        return await begin(update, context)
+
+    reg = context.user_data.pop("reg", None)
+    if not reg or "wallet" not in reg:
+        await query.edit_message_text("Something went wrong. Send /register to try again.")
+        return ConversationHandler.END
+
+    user = update.effective_user
+    db = get_db(context)
+    # Check again in case someone else registered the same details meanwhile.
+    owner = db.x_owner(reg["x_handle"], reg["x_user_id"])
+    wallet_owner = db.wallet_owner(reg["wallet"])
+    if (owner not in (None, user.id)) or (wallet_owner not in (None, user.id)):
+        await query.edit_message_text("Those details were just registered by someone else. Send /register to try again.")
+        return ConversationHandler.END
+
+    db.register_user(user.id, user.username, user.first_name, reg["x_handle"], reg["x_user_id"], reg["wallet"])
+    db.link_username_everywhere(user.id, user.username, user.full_name)
+
+    # Their welcome message has done its job.
+    for row in db.welcome_messages_for(user.id):
+        await safe_delete(context, row["chat_id"], row["message_id"])
+        db.remove_scheduled(row["id"])
+
+    await query.edit_message_text(
+        "You're registered!\n\n"
+        f"X: @{html.escape(reg['x_handle'])}\n"
+        f"Verona: <code>{html.escape(reg['wallet'])}</code>\n\n"
+        "Your comments on raids will now be tracked. Send /register again any time to change these.",
+        parse_mode=ParseMode.HTML,
+    )
+    return ConversationHandler.END
+
+
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    context.user_data.pop("reg", None)
+    await update.effective_message.reply_text("Registration cancelled. Send /register to start again.")
+    return ConversationHandler.END
+
+
+async def timeout(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    context.user_data.pop("reg", None)
+    return ConversationHandler.END
+
+
+async def me_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    u = get_db(context).get_user(update.effective_user.id)
+    if not u or not u["registered_at"]:
+        await update.effective_message.reply_text("You're not registered yet. Send /register to start.")
+        return
+    await update.effective_message.reply_text(
+        f"X: @{html.escape(u['x_handle'])}\nVerona: <code>{html.escape(u['wallet'])}</code>\n\n"
+        "Send /register to change these.",
+        parse_mode=ParseMode.HTML,
+    )
+
+
+def build_register_handler() -> ConversationHandler:
+    private = filters.ChatType.PRIVATE & filters.UpdateType.MESSAGE
+    text = private & filters.TEXT & ~filters.COMMAND
+    return ConversationHandler(
+        entry_points=[
+            CommandHandler("start", start_private, filters=private),
+            CommandHandler("register", begin, filters=private),
+        ],
+        states={
+            ASK_X: [MessageHandler(text, got_x)],
+            ASK_WALLET: [MessageHandler(text, got_wallet)],
+            CONFIRM: [CallbackQueryHandler(confirm, pattern=r"^reg:(ok|redo)$")],
+            ConversationHandler.TIMEOUT: [MessageHandler(filters.ALL, timeout)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel, filters=private)],
+        allow_reentry=True,
+        conversation_timeout=15 * 60,
+        name="register",
+    )
+

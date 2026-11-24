@@ -1,0 +1,135 @@
+RAID BOT COMMANDS
+=================
+
+Bot: @raids_bot
+
+
+FOR EVERYONE
+------------
+
+/register
+    Link your X account and Verona address so your raid comments get counted.
+    Typed in the group, it gives you a button that opens a private chat with the bot.
+    The bot asks two things:
+      1. Your X username or profile link (@name, name or x.com/name all work)
+      2. Your Verona address (starts with xion1)
+    Then you press Confirm. Run it again any time to change your details.
+
+/me
+    (private chat with the bot) Shows the X account and Verona address you registered.
+
+/leaderboard
+    This week's leaderboard for the group.
+    Points: 1 per raid you comment on, +1 extra if you comment within 10 minutes.
+    Streak: how many raids in a row you've joined.
+    Weeks run Monday to Sunday (UTC).
+
+/help
+    Shows the list of commands.
+
+
+FOR ADMINS: TAGGING AND RAIDS
+-----------------------------
+
+@all
+    Tags everyone in the group, 5 people per message.
+    Registered members are tagged first. Unregistered members are tagged after,
+    with a reminder to /register.
+    Can be used once every 15 minutes (shared with @raidall).
+    The tag messages delete themselves after 4 hours.
+    /all does the same thing.
+
+@raidall
+    Same tagging as @all, then posts your raid message with the X link filled in
+    and pins it with a notification to everyone.
+    The link is taken from, in this order:
+      1. the same message (example: @raidall https://x.com/name/status/123)
+      2. the message you're replying to
+      3. the last X link you posted in the group (within 24 hours)
+    A raid lasts 12 hours. While it runs, the bot checks the post's replies
+    every 10 minutes and counts comments from registered members only.
+    @allraid, /raidall and /allraid do the same thing.
+
+/endraid
+    Ends a raid early and posts the summary.
+    If more than one raid is running, the bot shows buttons so you can pick which one.
+
+/lock 15 60m
+    Locks the chat for everyone except admins until 15 registered members have
+    commented on the latest raid, or until 60 minutes pass, whichever comes first.
+    Pick any numbers, for example /lock 10 30m, /lock 20 2h, /lock 30 90m.
+    Only works while a raid is running. While locked, the bot checks for comments
+    every 2 minutes. The group's normal permissions come back exactly as they were.
+
+/unlock
+    Unlocks the chat early.
+
+
+FOR ADMINS: SETUP
+-----------------
+
+/addusers @name1 @name2 @name3
+    Adds people to the tag list. Only needed once, when the bot is new.
+    After that, people are added automatically when they send a message or join,
+    and removed when they leave.
+
+/removeuser @name
+    Takes someone off the tag list.
+
+/members
+    Shows how many members the bot knows, and who isn't registered yet.
+
+/settemplate
+    Sets the raid message. The bot asks you to send the template next.
+    Put {link} where the X post link should go. Bold, italics and links are kept.
+    Example:
+        New post is live! Go comment and repost:
+        {link}
+
+/setwelcome
+    Sets the welcome message for new members. The bot asks you to send it next.
+    Put {name} where the new member's name should go. A Register button is added
+    automatically.
+
+/template
+    Shows a preview of the raid message and the welcome message.
+
+/welcome
+    Posts the welcome message. Reply to someone's message with /welcome to
+    welcome that person.
+    The welcome message deletes itself once that person registers, or after 24 hours.
+
+/cancel
+    Stops /settemplate, /setwelcome or /register halfway through.
+
+
+FOR ADMINS: REPORTS
+-------------------
+Reports are sent to you in a private chat with the bot, never in the group.
+Press Start on @raids_bot once so it can message you.
+
+/raidcsv
+    CSV of the latest raid.
+
+/raidcsv 3
+    CSV of raid number 3 (raid numbers are shown in each raid summary).
+
+/raidcsv all
+    CSV of every raid in one file.
+
+    Columns: raid number, raid link, start time, Telegram username, Telegram name,
+    X handle, Verona address, registered, raided, reply link, reply time,
+    time after raid start.
+
+Weekly leaderboard
+    Posted in the group automatically every Monday (UTC).
+    Every admin who has pressed Start on the bot also gets a private CSV of the
+    top 5, with their Verona addresses, for sending rewards.
+
+
+AUTOMATIC THINGS
+----------------
+- Raid summary when a raid ends: how many commented, the fastest, and who missed it.
+- Lock summary when a lock ends, whether the target was reached, time ran out or an admin unlocked.
+- Welcome message for new members, with a Register button.
+- New members are added to the tag list automatically, and people who leave are removed.

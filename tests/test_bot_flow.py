@@ -1,0 +1,319 @@
+"""End-to-end test: the real bot handlers talking to a fake Telegram and a fake X.
+
+Nothing here touches the network or a real group.
+"""
+
+import asyncio
+import itertools
+import json
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+from telegram import Update
+from telegram.ext import CallbackContext
+from telegram.request import BaseRequest
+
+from raidbot.app import build_app, housekeeping_job
+from raidbot.config import Config
+from raidbot.h_raid import tracking_job
+from raidbot.utils import bech32_encode, convert_bits
+from raidbot.xapi import Reply
+
+BOT_ID = 5000
+ADMIN = {"id": 1, "is_bot": False, "first_name": "Admin", "username": "boss"}
+ALICE = {"id": 11, "is_bot": False, "first_name": "Alice", "username": "alice"}
+BOB = {"id": 12, "is_bot": False, "first_name": "Bob", "username": "bobby"}
+NEWBIE = {"id": 13, "is_bot": False, "first_name": "Newbie"}
+STRANGER = {"id": 14, "is_bot": False, "first_name": "Rando", "username": "rando"}
+CHAT = {"id": -100777, "type": "supergroup", "title": "Raid Group"}
+POST = "https://x.com/Burnt/status/1861234567890123456"
+FAKE_TOKEN = "123456789:" + "fake" * 9  # not a real token
+
+
+def wallet(n: int) -> str:
+    return bech32_encode("xion", convert_bits([n] * 32, 8, 5, True))
+
+
+class FakeTelegram(BaseRequest):
+    def __init__(self):
+        self.calls: list[tuple[str, dict]] = []
+        self.files: list[bytes] = []
+        self.ids = itertools.count(100)
+
+    @property
+    def read_timeout(self):
+        return 1.0
+
+    async def initialize(self):
+        pass
+
+    async def shutdown(self):
+        pass
+
+    def of(self, method: str) -> list[dict]:
+        return [p for m, p in self.calls if m == method]
+
+    def texts(self) -> list[str]:
+        return [p.get("text", "") for p in self.of("sendMessage")]
+
+    def clear(self):
+        self.calls.clear()
+
+    async def do_request(self, url, method, request_data=None, **kwargs):
+        name = url.rsplit("/", 1)[-1]
+        params = dict(request_data.parameters) if request_data else {}
+        if request_data and request_data.contains_files:
+            for f in request_data.multipart_data.values():
+                content = f[1] if isinstance(f, tuple) else f
+                self.files.append(content)
+        self.calls.append((name, params))
+        return 200, json.dumps({"ok": True, "result": self.result(name, params)}).encode()
+
+    def result(self, name: str, p: dict):
+        if name == "getMe":
+            return {"id": BOT_ID, "is_bot": True, "first_name": "Raid", "username": "raid_test_bot",
+                    "can_join_groups": True, "can_read_all_group_messages": True,
+                    "supports_inline_queries": False}
+        if name in ("sendMessage", "sendDocument", "editMessageText", "editMessageReplyMarkup"):
+            chat_id = int(p.get("chat_id", CHAT["id"]))
+            chat = CHAT if chat_id < 0 else {"id": chat_id, "type": "private", "first_name": "x"}
+            return {"message_id": next(self.ids), "date": int(time.time()), "chat": chat,
+                    "from": {"id": BOT_ID, "is_bot": True, "first_name": "Raid"},
+                    "text": p.get("text", "")}
+        if name == "getChatAdministrators":
+            return [{"status": "creator", "user": ADMIN, "is_anonymous": False}]
+        if name == "getChat":
+            return {**CHAT, "accent_color_id": 0, "max_reaction_count": 11,
+                    "accepted_gift_types": {"unlimited_gifts": False, "limited_gifts": False,
+                                            "unique_gifts": False, "premium_subscription": False,
+                                            "gifts_from_channels": False},
+                    "permissions": {"can_send_messages": True, "can_send_photos": False}}
+        return True
+
+
+class FakeX:
+    def __init__(self):
+        self.replies: list[Reply] = []
+        self.users = {"alicex": ("111", "AliceX"), "bobx": ("222", "BobX")}
+
+    async def get_user(self, username):
+        return self.users.get(username.lower())
+
+    async def get_conversation_id(self, tweet_id):
+        return tweet_id
+
+    async def search_replies(self, conversation_id, since_id=None):
+        return list(self.replies), None
+
+    async def close(self):
+        pass
+
+
+class Harness:
+    def __init__(self, tmp_path):
+        self.tg = FakeTelegram()
+        cfg = Config(telegram_token=FAKE_TOKEN, x_bearer_token=None, db_path=str(tmp_path / "bot.db"),
+                     track_interval=600, lock_check_interval=120)
+        self.app = build_app(cfg, request=self.tg, rate_limit=False)
+        self.x = FakeX()
+        self.app.bot_data["x"] = self.x
+        self.db = self.app.bot_data["db"]
+        self.ids = itertools.count(1)
+        self.ctx = None
+
+    async def start(self):
+        await self.app.initialize()
+        self.ctx = CallbackContext(self.app)
+
+    async def send(self, user, text, chat=CHAT, reply_to=None, edited=False, **extra):
+        msg = {"message_id": next(self.ids), "date": int(time.time()), "chat": chat, "from": user,
+               "text": text, **extra}
+        if text.startswith("/"):
+            msg["entities"] = [{"type": "bot_command", "offset": 0, "length": len(text.split()[0])}]
+        if reply_to:
+            msg["reply_to_message"] = reply_to
+        key = "edited_message" if edited else "message"
+        if edited:
+            msg["edit_date"] = int(time.time())
+        await self.app.process_update(Update.de_json({"update_id": next(self.ids), key: msg}, self.app.bot))
+        await self.settle()
+
+    async def dm(self, user, text):
+        await self.send(user, text, chat={"id": user["id"], "type": "private", "first_name": user["first_name"]})
+
+    async def press(self, user, data, chat):
+        bot_msg = {"message_id": 1, "date": int(time.time()), "chat": chat,
+                   "from": {"id": BOT_ID, "is_bot": True, "first_name": "Raid"}, "text": "x"}
+        upd = {"update_id": next(self.ids),
+               "callback_query": {"id": str(next(self.ids)), "from": user, "chat_instance": "c",
+                                  "data": data, "message": bot_msg}}
+        await self.app.process_update(Update.de_json(upd, self.app.bot))
+        await self.settle()
+
+    async def settle(self):
+        for _ in range(5):
+            tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task() and not t.done()]
+            if not tasks:
+                return
+            await asyncio.wait(tasks, timeout=2)
+
+    async def register(self, user, x_handle, w):
+        await self.dm(user, "/start register")
+        await self.dm(user, x_handle)
+        await self.dm(user, w)
+        await self.press(user, "reg:ok", {"id": user["id"], "type": "private", "first_name": user["first_name"]})
+
+
+def test_full_raid_flow(tmp_path):
+    asyncio.run(_full_raid_flow(tmp_path))
+
+
+async def _full_raid_flow(tmp_path):
+    h = Harness(tmp_path)
+    tg, db = h.tg, h.db
+    await h.start()
+
+    # 1. Admin preloads usernames. Non-admins can't.
+    await h.send(STRANGER, "/addusers @hacker")
+    assert not any("Added" in t for t in tg.texts())
+    await h.send(ADMIN, "/addusers @alice @bobby @carol @daveo @erinn @frank @x")
+    assert any("Added 6" in t and "Skipped (not valid Telegram usernames): @x" in t for t in tg.texts())
+
+    # 2. Alice talks, so her preloaded row gets her user ID.
+    await h.send(ALICE, "gm")
+    assert any(m["user_id"] == 11 for m in db.list_members(CHAT["id"]))
+
+    # 3. Alice registers privately: X link gets normalised, wallet checked, then confirmed.
+    tg.clear()
+    await h.dm(ALICE, "/start register")
+    await h.dm(ALICE, "https://x.com/alicex")
+    await h.dm(ALICE, "xion1notvalid")
+    assert any("isn't a valid Verona address" in t for t in tg.texts())
+    await h.dm(ALICE, wallet(1))
+    await h.press(ALICE, "reg:ok", {"id": 11, "type": "private", "first_name": "Alice"})
+    alice = db.get_user(11)
+    assert alice["x_handle"] == "AliceX" and alice["x_user_id"] == "111" and alice["wallet"] == wallet(1)
+
+    # Bob can't claim Alice's X account.
+    tg.clear()
+    await h.dm(BOB, "/register")
+    await h.dm(BOB, "@AliceX")
+    assert any("already registered by someone else" in t for t in tg.texts())
+    await h.dm(BOB, "/cancel")
+
+    # 4. Admin sets the raid template; one without {link} is refused.
+    await h.send(ADMIN, "/settemplate")
+    await h.send(ADMIN, "no link here")
+    assert db.get_group(CHAT["id"])["template_html"] is None
+    await h.send(ADMIN, "RAID NOW {link} like and comment")
+    assert "{link}" in db.get_group(CHAT["id"])["template_html"]
+
+    # 5. Admin posts the link, then @raidall: tags (registered first), raid message, pin.
+    await h.send(ADMIN, f"new post {POST}?s=20")
+    tg.clear()
+    await h.send(ADMIN, "@raidall")
+    texts = tg.texts()
+    assert "@alice" in texts[0] and "UNREGISTERED" not in texts[0]
+    unreg = [t for t in texts if t.startswith("<b>UNREGISTERED USERS:</b>")]
+    # The admin and the stranger were auto-added when they spoke: 7 unregistered, 2 batches of max 5.
+    assert len(unreg) == 2 and "@bobby" in unreg[0] and "@frank" in unreg[1]
+    assert all(t.count("@") <= 5 for t in texts[:-1])
+    assert texts[-1] == f"RAID NOW {POST} like and comment"
+    pins = tg.of("pinChatMessage")
+    assert len(pins) == 1 and not pins[0].get("disable_notification")
+    raid = db.latest_raid(CHAT["id"])
+    assert raid["raid_no"] == 1 and raid["status"] == "active"
+    tag_deletes = db.due_deletes(time.time() + 4 * 3600 + 5)
+    assert len([d for d in tag_deletes if d["kind"] == "tag"]) == 3
+
+    # 6. Cooldown, edited messages and non-admins don't trigger tagging.
+    tg.clear()
+    await h.send(ADMIN, "@all")
+    assert any("cooldown" in t for t in tg.texts())
+    tg.clear()
+    await h.send(ADMIN, "@all", edited=True)
+    await h.send(STRANGER, "@all")
+    assert tg.of("sendMessage") == []
+
+    # 7. Tracking: Alice's reply counts, an outsider's doesn't.
+    t0 = raid["started_at"]
+    h.x.replies = [Reply("9001", "111", "AliceX", t0 + 75), Reply("9002", "777", "Outsider", t0 + 10)]
+    await tracking_job(h.ctx)
+    assert db.engagement_count(raid["id"]) == 1
+
+    # 8. Lock until 2 comments. Bob registers and comments, lock opens on the next check.
+    tg.clear()
+    await h.send(ADMIN, "/lock 2 60m")
+    perms = tg.of("setChatPermissions")
+    assert len(perms) == 1 and "Chat locked" in tg.texts()[-1]
+    await h.register(BOB, "bobx", wallet(2))
+    assert db.get_user(12)["registered_at"]
+    h.x.replies.append(Reply("9003", "222", "BobX", t0 + 400))
+    db.update_raid(raid["id"], last_checked_at=0)
+    tg.clear()
+    await tracking_job(h.ctx)
+    perms = tg.of("setChatPermissions")
+    assert len(perms) == 1
+    restored = perms[0]["permissions"]
+    restored = json.loads(restored) if isinstance(restored, str) else restored
+    assert restored.get("can_send_messages") is True and restored.get("can_send_photos") is False
+    summary = tg.texts()[-1]
+    assert "Chat unlocked: target reached" in summary and "Commented: 2 of 2" in summary
+    assert db.active_lock(CHAT["id"]) is None
+
+    # 9. /raidcsv: command deleted from the group, file sent privately to the admin.
+    tg.clear()
+    tg.files.clear()
+    await h.send(ADMIN, "/raidcsv")
+    assert tg.of("deleteMessage")
+    docs = tg.of("sendDocument")
+    assert len(docs) == 1 and int(docs[0]["chat_id"]) == ADMIN["id"]
+    csv_text = b"".join(f if isinstance(f, bytes) else b"" for f in tg.files).decode("utf-8-sig", "ignore")
+    assert "AliceX" in csv_text and wallet(1) in csv_text and "1m 15s" in csv_text
+
+    # 10. A second raid can run alongside; /endraid then asks which one.
+    db.set_group(CHAT["id"], "last_tag_at", 0)
+    await h.send(ADMIN, "@raidall https://x.com/Burnt/status/1861234567890999999")
+    assert len(db.active_raids(CHAT["id"])) == 2
+    tg.clear()
+    await h.send(ADMIN, "/endraid")
+    assert tg.of("sendMessage")[-1].get("reply_markup")
+    await h.press(ADMIN, f"endraid:{raid['id']}", CHAT)
+    assert db.get_raid(raid["id"])["status"] == "ended"
+    assert any("Raid #1 is over" in t for t in tg.texts())
+
+    # 11. Raids end on their own after 12 hours.
+    db.conn.execute("UPDATE raids SET ends_at = 0 WHERE status = 'active'")
+    db.conn.commit()
+    await housekeeping_job(h.ctx)
+    assert db.active_raids(CHAT["id"]) == []
+
+    # 12. Welcome: posted on join, deleted as soon as the newcomer registers.
+    tg.clear()
+    await h.send(ADMIN, "", new_chat_members=[NEWBIE])
+    welcome = [p for p in tg.of("sendMessage") if "Welcome" in p.get("text", "")]
+    assert len(welcome) == 1 and "tg://user?id=13" in welcome[0]["text"]
+    assert any(m["user_id"] == 13 for m in db.list_members(CHAT["id"]))
+    tg.clear()
+    h.x.users["newbiex_1"] = ("333", "NewbieX_1")
+    await h.register(NEWBIE, "newbiex_1", wallet(3))
+    assert tg.of("deleteMessage"), "welcome message should be deleted after registering"
+
+    # 13. Leaving removes the member.
+    await h.send(ADMIN, "", left_chat_member=NEWBIE)
+    assert not any(m["user_id"] == 13 for m in db.list_members(CHAT["id"]))
+
+    await h.app.shutdown()
+
+
+def test_missing_token_message(tmp_path):
+    env = {k: v for k, v in os.environ.items() if k not in ("TELEGRAM_BOT_TOKEN", "X_BEARER_TOKEN")}
+    env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1])
+    r = subprocess.run([sys.executable, "-m", "raidbot"], cwd=tmp_path, env=env,
+                       capture_output=True, text=True, timeout=60)
+    assert r.returncode == 1
+    assert "TELEGRAM_BOT_TOKEN is not set" in r.stderr
+    assert "Traceback" not in r.stderr

@@ -1,6 +1,6 @@
 # Raid Bot: Final Spec
 
-Status: agreed, ready to build. Hosting will be decided after the bot is built.
+Status: built. Hosting will be decided next. Every command is explained in COMMANDS.txt.
 
 ## Setup
 
@@ -18,6 +18,8 @@ Status: agreed, ready to build. Hosting will be decided after the bot is built.
 - People are added automatically when they send a message or join, and removed when they leave.
 - Each person is linked to their Telegram user ID once the bot sees them, so username changes don't break tags.
 - People with no Telegram username can't be preloaded. They're added the first time they message.
+- `/removeuser @name` (admin): takes someone off the tag list.
+- `/members` (admin): shows who is and isn't registered.
 
 ## 2. Registration
 
@@ -26,7 +28,8 @@ Status: agreed, ready to build. Hosting will be decided after the bot is built.
   1. X profile: accepts `@name`, `name`, or an `x.com` / `twitter.com` link. Saved in one format. The bot looks up the X account ID so tracking survives handle changes.
   2. Verona address: must be a valid `xion1...` address. The checksum is checked, so typos get rejected.
 - At the end it shows both answers with a Confirm button.
-- One X account can belong to only one Telegram user.
+- One X account and one Verona address can each belong to only one Telegram user.
+- `/me` in the private chat shows what you registered. `/cancel` stops registration halfway.
 - Running `/register` again updates the details.
 - Wallet addresses are never posted in a group. They only appear in the admin CSV files.
 
@@ -35,13 +38,14 @@ Status: agreed, ready to build. Hosting will be decided after the bot is built.
 - First it tags registered members in batches of 5.
 - Then it tags unregistered members in batches of 5. Every one of those batches says: "UNREGISTERED USERS: register with /register to get tracked for raids."
 - 15 minute cooldown per group, shared with `@raidall`.
+- `/all` works the same. Editing an old message that says @all does not tag again.
 - Tag messages delete themselves after 4 hours. Delete times are saved, so this still happens after a restart.
 
 ## 4. Raids
 
 - `/settemplate` (admin): the bot asks for the template, the admin sends it. It must contain `{link}`, or the bot warns. Bold, italics and links are kept.
 - `/template`: shows a preview.
-- `@raidall` (admin):
+- `@raidall` (admin, also `@allraid`, `/raidall`, `/allraid`):
   1. Uses the X link in the same message, or the latest X link the same admin posted.
   2. Tags everyone, the same way as `@all`.
   3. Posts the raid message with the link filled in.
@@ -51,7 +55,7 @@ Status: agreed, ready to build. Hosting will be decided after the bot is built.
 
 ## 5. Tracking (X API)
 
-- While a raid is live, the bot checks the post's replies every 10 minutes. This can be changed in settings.
+- While a raid is live, the bot checks the post's replies every 10 minutes. While the chat is locked, it checks every 2 minutes so the chat opens soon after the target is hit. Both can be changed with environment variables.
 - Only registered members count. Replies from outsiders are ignored.
 - Any reply in the post's thread counts, but only one per person. The time of their first reply is used.
 - Each person's response time is saved, for example "2m 14s after the raid started".
@@ -67,6 +71,7 @@ Status: agreed, ready to build. Hosting will be decided after the bot is built.
 
 - Posted when a lock ends, whatever ended it, and when a raid ends.
 - Contents: how many commented, the fastest commenters, and who missed it.
+- Names in summaries and leaderboards are written without @, so they don't ping people again.
 
 ## 8. CSV reports (admins only, sent privately)
 
