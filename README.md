@@ -10,7 +10,7 @@ tracks who comments on X, locks the chat until enough people comment, and keeps 
 
 1. Add the bot to your group and make it an **admin** with these rights:
    - Delete messages
-   - Pin messages
+   - Pin messages (for raid posts, and feeds turned on with `pin`)
    - Ban users (Telegram needs this right for /raidlock)
 
    Being an admin also lets the bot see every message. It needs that to keep the member list up to date

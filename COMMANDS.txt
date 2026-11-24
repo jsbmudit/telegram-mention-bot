@@ -87,11 +87,18 @@ Posts from any X account show up in the group automatically. Needs the X API key
 /feedon VeronaOfficial all
     Same, but also includes their replies and reposts.
 
+/feedon VeronaOfficial pin
+    Same as /feedon VeronaOfficial, and every new post is also pinned with a
+    notification to everyone. Without pin, posts are never pinned.
+    You can combine it with all: /feedon VeronaOfficial all pin
+    Running /feedon again for the same account replaces its settings, so
+    /feedon VeronaOfficial on its own turns pinning off again.
+
 /feedoff VeronaOfficial
     Stops it.
 
 /feeds
-    Lists the X feeds that are on in this group.
+    Lists the X feeds that are on in this group, and which ones pin their posts.
 
     You can have as many feeds as you want, in as many groups as you want.
     Feed posts stay in the chat (they aren't auto-deleted).

@@ -157,3 +157,20 @@ def test_replies_matched_by_x_id_without_author_profiles(tmp_path):
     replies = [Reply("701", "111", None, raid["started_at"] + 5), Reply("702", "999", None, raid["started_at"] + 6)]
     assert core.record_replies(db, raid, replies) == 1
     assert db.engagements(raid["id"])[0]["reply_url"] == "https://x.com/AliceX/status/701"
+
+
+def test_feeds_get_pin_column_on_old_databases(tmp_path):
+    import sqlite3
+    path = str(tmp_path / "old_feeds.db")
+    db = Database(path)
+    db.close()
+    conn = sqlite3.connect(path)  # make it look like a database from before 'pin' existed
+    conn.execute("ALTER TABLE feeds DROP COLUMN pin")
+    conn.execute("INSERT INTO feeds(chat_id, x_user_id, handle, mode, created_at) VALUES(?, '1', 'old', 'posts', 0)",
+                 (CHAT,))
+    conn.commit()
+    conn.close()
+    db = Database(path)  # reopening runs the upgrade
+    assert db.feeds_for_chat(CHAT)[0]["pin"] == 0
+    db.add_feed(CHAT, "1", "old", None, "posts", None, pin=True)
+    assert db.feeds_for_chat(CHAT)[0]["pin"] == 1

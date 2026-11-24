@@ -497,6 +497,7 @@ async def _x_feed_and_rose_names(tmp_path):
     await h.send(ADMIN, "/feedon https://x.com/VeronaOfficial")
     feed = db.feeds_for_chat(chat_id)[0]
     assert feed["handle"] == "VeronaOfficial" and feed["since_id"] == "1000" and feed["mode"] == "posts"
+    assert feed["pin"] == 0
 
     # New post with an image is forwarded; the reply is skipped in posts mode.
     h.x.timeline += [
@@ -512,6 +513,7 @@ async def _x_feed_and_rose_names(tmp_path):
     assert "https://x.com/VeronaOfficial/status/1001" in photos[0]["caption"]
     texts = tg.texts()
     assert len(texts) == 1 and "Big news &lt;soon&gt;" in texts[0] and "thanks" not in texts[0]
+    assert tg.of("pinChatMessage") == []  # plain /feedon doesn't pin
     assert db.feeds_for_chat(chat_id)[0]["since_id"] == "1003"
 
     # Not due again yet; and once due, nothing is posted twice.
@@ -532,6 +534,45 @@ async def _x_feed_and_rose_names(tmp_path):
     tg.clear()
     await feed_job(h.ctx)
     assert any("replied on X" in t and "@fan yes!" in t for t in tg.texts())
+
+    # 'pin' pins every new post with a notification, and works together with 'all'.
+    tg.clear()
+    await h.send(ADMIN, "/feedon VeronaOfficial pin all")
+    feed = db.feeds_for_chat(chat_id)[0]
+    assert feed["pin"] == 1 and feed["mode"] == "all"
+    assert any("pinned with a notification" in t for t in tg.texts())
+    h.x.timeline += [Post("1005", "Pin me", 0.0, None, "post"),
+                     Post("1006", "Pin me too", 0.0, "https://pbs.twimg.com/media/y.jpg", "post")]
+    db.conn.execute("UPDATE feeds SET last_checked_at = 0")
+    db.conn.commit()
+    tg.clear()
+    await feed_job(h.ctx)
+    sent_ids = [m for m, _ in tg.calls if m in ("sendMessage", "sendPhoto")]
+    assert sent_ids == ["sendMessage", "sendPhoto"]
+    pins = tg.of("pinChatMessage")
+    assert len(pins) == 2
+    assert all(str(p.get("disable_notification", False)).lower() in ("false", "0") for p in pins)
+
+    # /feeds shows that it pins.
+    tg.clear()
+    await h.send(ADMIN, "/feeds")
+    assert any("@VeronaOfficial (everything, pinned)" in t for t in tg.texts())
+
+    # Running /feedon again without 'pin' turns pinning off.
+    await h.send(ADMIN, "/feedon VeronaOfficial")
+    assert db.feeds_for_chat(chat_id)[0]["pin"] == 0
+    h.x.timeline.append(Post("1007", "No pin", 0.0, None, "post"))
+    db.conn.execute("UPDATE feeds SET last_checked_at = 0")
+    db.conn.commit()
+    tg.clear()
+    await feed_job(h.ctx)
+    assert any("No pin" in t for t in tg.texts()) and tg.of("pinChatMessage") == []
+
+    # Unknown or repeated options get the usage message.
+    for bad in ("/feedon VeronaOfficial pinn", "/feedon VeronaOfficial pin pin"):
+        tg.clear()
+        await h.send(ADMIN, bad)
+        assert any("Usage: /feedon" in t for t in tg.texts())
 
     # /feeds lists it, /feedoff stops it.
     tg.clear()

@@ -143,6 +143,7 @@ Variables: {link} {xname} {xhandle} {xprofile}
 <b>Admins: X feed</b>
 /feedon VeronaOfficial: post that account's new X posts here
 /feedon VeronaOfficial all: also include replies and reposts
+/feedon VeronaOfficial pin: also pin each new post (works with all too)
 /feedoff VeronaOfficial: stop it
 /feeds: list feeds in this group
 

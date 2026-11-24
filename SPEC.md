@@ -113,6 +113,9 @@ Status: built. Hosting will be decided next. Every command is explained in COMMA
 ## 10. X feed
 
 - `/feedon VeronaOfficial` (admin): posts that account's new X posts into the group. `all` at the end also includes replies and reposts.
+- `pin` at the end also pins each new post with a notification to everyone, like a raid post. Without `pin`, nothing is pinned. `all` and `pin` can be used together in any order, for example `/feedon VeronaOfficial all pin`.
+- Running `/feedon` again for the same account replaces its settings, so `/feedon VeronaOfficial` on its own turns pinning off.
+- Feed pins are never unpinned by the bot.
 - `/feedoff VeronaOfficial` stops it, `/feeds` lists what's on. Any number of accounts and groups.
 - Starts from the newest post, checks every minute (`FEED_INTERVAL_MINUTES`). A check that finds no new posts costs nothing, sends images when a post has one, and caps at 10 posts per check so a long outage doesn't flood the chat.
 - One X request per account per check, even when several groups follow the same account.

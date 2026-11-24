@@ -117,6 +117,7 @@ CREATE TABLE IF NOT EXISTS feeds (
     handle          TEXT NOT NULL,
     name            TEXT,
     mode            TEXT NOT NULL DEFAULT 'posts',
+    pin             INTEGER NOT NULL DEFAULT 0,
     since_id        TEXT,
     last_checked_at REAL NOT NULL DEFAULT 0,
     created_at      REAL NOT NULL,
@@ -147,6 +148,9 @@ class Database:
             self.conn.execute("ALTER TABLE locks ADD COLUMN message_id INTEGER")
         if "summary_message_id" not in lock_cols:
             self.conn.execute("ALTER TABLE locks ADD COLUMN summary_message_id INTEGER")
+        feed_cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(feeds)")}
+        if "pin" not in feed_cols:
+            self.conn.execute("ALTER TABLE feeds ADD COLUMN pin INTEGER NOT NULL DEFAULT 0")
         # Single templates from the first version become the "default" template.
         self.conn.execute(
             "INSERT OR IGNORE INTO templates(chat_id, name, body_html, photo_file_id, updated_at) "
@@ -216,13 +220,14 @@ class Database:
     # ------------------------------------------------------------ feeds
 
     def add_feed(self, chat_id: int, x_user_id: str, handle: str, name: str | None,
-                 mode: str, since_id: str | None) -> None:
+                 mode: str, since_id: str | None, pin: bool = False) -> None:
         self.ensure_group(chat_id)
         self._run(
-            "INSERT INTO feeds(chat_id, x_user_id, handle, name, mode, since_id, created_at) "
-            "VALUES(?, ?, ?, ?, ?, ?, ?) ON CONFLICT(chat_id, x_user_id) DO UPDATE SET "
-            "handle = excluded.handle, name = excluded.name, mode = excluded.mode, since_id = excluded.since_id",
-            (chat_id, x_user_id, handle, name, mode, since_id, time.time()),
+            "INSERT INTO feeds(chat_id, x_user_id, handle, name, mode, pin, since_id, created_at) "
+            "VALUES(?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(chat_id, x_user_id) DO UPDATE SET "
+            "handle = excluded.handle, name = excluded.name, mode = excluded.mode, pin = excluded.pin, "
+            "since_id = excluded.since_id",
+            (chat_id, x_user_id, handle, name, mode, int(pin), since_id, time.time()),
         )
 
     def remove_feed(self, chat_id: int, handle: str) -> bool:

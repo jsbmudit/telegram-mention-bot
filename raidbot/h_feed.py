@@ -9,7 +9,7 @@ import re
 import time
 from collections import defaultdict
 
-from telegram import Update
+from telegram import Message, Update
 from telegram.constants import ParseMode
 from telegram.error import TelegramError
 from telegram.ext import ContextTypes
@@ -24,6 +24,12 @@ MAX_POSTS_PER_CHECK = 10   # if the bot was offline for a while, don't flood the
 CAPTION_LIMIT = 1024
 MESSAGE_LIMIT = 4096
 _TRAILING_TCO = re.compile(r"\s*https://t\.co/\w+\s*$")
+FEEDON_USAGE = (
+    "Usage: /feedon VeronaOfficial\n"
+    "Add 'all' to include replies and reposts: /feedon VeronaOfficial all\n"
+    "Add 'pin' to pin each new post: /feedon VeronaOfficial pin\n"
+    "Both work together: /feedon VeronaOfficial all pin"
+)
 NO_KEY = "The X feed needs the X API key (X_BEARER_TOKEN). Ask whoever runs the bot to add it."
 
 
@@ -35,10 +41,12 @@ async def feedon_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         return
     args = context.args or []
     handle = normalize_x_handle(args[0]) if args else None
-    mode = args[1].lower() if len(args) > 1 else "posts"
-    if not handle or mode not in ("posts", "all"):
-        await reply_temp(context, msg, "Usage: /feedon VeronaOfficial\nAdd 'all' to include replies and reposts: /feedon VeronaOfficial all")
+    options = {a.lower() for a in args[1:]}
+    if not handle or not options <= {"all", "pin"} or len(args) - 1 != len(options):
+        await reply_temp(context, msg, FEEDON_USAGE)
         return
+    mode = "all" if "all" in options else "posts"
+    pin = "pin" in options
     x = get_x(context)
     if not x:
         await reply_temp(context, msg, NO_KEY)
@@ -55,14 +63,15 @@ async def feedon_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         await reply_temp(context, msg, "X didn't answer properly. Try again in a few minutes.")
         return
     since = max((p.id for p in latest), key=int, default=None)
-    get_db(context).add_feed(msg.chat_id, user["id"], user["username"], user["name"], mode, since)
+    get_db(context).add_feed(msg.chat_id, user["id"], user["username"], user["name"], mode, since, pin)
     what = "posts, replies and reposts" if mode == "all" else "posts"
     interval = get_cfg(context).feed_interval
     every = "minute" if interval == 60 else format_duration(interval)
     await reply_temp(
         context, msg,
         f"X feed on: new {what} from <b>{html.escape(user['name'] or user['username'])}</b> "
-        f"(@{html.escape(user['username'])}) will be posted here. I check every {every}.\n"
+        f"(@{html.escape(user['username'])}) will be posted here"
+        f"{' and pinned with a notification' if pin else ''}. I check every {every}.\n"
         f"Turn it off with /feedoff {html.escape(user['username'])}",
         MEDIUM,
     )
@@ -93,6 +102,8 @@ async def feeds_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     lines = ["<b>X feeds in this group</b>"]
     for f in feeds:
         what = "everything" if f["mode"] == "all" else "posts"
+        if f["pin"]:
+            what += ", pinned"
         lines.append(f"@{html.escape(f['handle'])} ({what}): turn off with /feedoff {html.escape(f['handle'])}")
     if not get_x(context):
         lines += ["", NO_KEY]
@@ -117,15 +128,14 @@ def format_post(name: str | None, handle: str, post: Post) -> tuple[str, str]:
 
 
 async def send_post(context: ContextTypes.DEFAULT_TYPE, chat_id: int, name: str | None,
-                    handle: str, post: Post) -> None:
+                    handle: str, post: Post) -> Message:
     full, caption = format_post(name, handle, post)
     if post.photo_url:
         try:
-            await context.bot.send_photo(chat_id, post.photo_url, caption=caption, parse_mode=ParseMode.HTML)
-            return
+            return await context.bot.send_photo(chat_id, post.photo_url, caption=caption, parse_mode=ParseMode.HTML)
         except TelegramError as e:
             log.info("Couldn't send the post's image, sending text instead: %s", e)
-    await context.bot.send_message(chat_id, full, parse_mode=ParseMode.HTML)
+    return await context.bot.send_message(chat_id, full, parse_mode=ParseMode.HTML)
 
 
 async def feed_job(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -166,9 +176,15 @@ async def feed_job(context: ContextTypes.DEFAULT_TYPE) -> None:
                 fresh = [p for p in fresh if p.kind in ("post", "quote")]
             for p in fresh[-MAX_POSTS_PER_CHECK:]:
                 try:
-                    await send_post(context, f["chat_id"], f["name"], f["handle"], p)
+                    sent = await send_post(context, f["chat_id"], f["name"], f["handle"], p)
                 except TelegramError as e:
                     log.warning("Couldn't post X feed item in chat %s: %s", f["chat_id"], e)
+                    continue
+                if f["pin"]:
+                    try:  # pinned with a notification, like a raid post
+                        await context.bot.pin_chat_message(f["chat_id"], sent.message_id, disable_notification=False)
+                    except TelegramError as e:
+                        log.warning("Couldn't pin X feed item in chat %s: %s", f["chat_id"], e)
             new_since = f["since_id"]
             if newest and (new_since is None or int(newest) > int(new_since)):
                 new_since = newest
