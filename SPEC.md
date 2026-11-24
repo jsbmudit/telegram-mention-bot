@@ -43,15 +43,29 @@ Status: built. Hosting will be decided next. Every command is explained in COMMA
 
 ## 4. Raids
 
-- `/settemplate` (admin): the bot asks for the template, the admin sends it. It must contain `{link}`, or the bot warns. Bold, italics and links are kept.
-- `/template`: shows a preview.
-- `@raidall` (admin, also `@allraid`, `/raidall`, `/allraid`):
+- Named templates per group: `/settemplate` saves the default one, `/settemplate fun` saves one called fun.
+  The admin sends text, or a photo with the template as its caption to attach that image. It must contain `{link}`.
+  Bold, italics and links are kept.
+- Template variables: `{link}`, `{xname}` (X display name of the post author), `{xhandle}`, `{xprofile}`.
+  The author is looked up with the X API when a key is set, otherwise with X's public embed service.
+- `/templates` lists them, `/template fun` previews one, `/deltemplate fun` deletes one.
+- `@raidall` (admin, also `@allraid`, `/raidall`, `/allraid`), optionally followed by a template name:
   1. Uses the X link in the same message, or the latest X link the same admin posted.
   2. Tags everyone, the same way as `@all`.
-  3. Posts the raid message with the link filled in.
+  3. Posts the chosen template with the link and author filled in, with its image if it has one.
   4. Pins it with notification. It is never unpinned.
 - A raid lasts 12 hours, or until `/endraid`.
 - More than one raid can be live at the same time. If several are live, `/endraid` shows buttons so the admin can pick which one to end.
+
+## 4b. Keeping the chat clean
+
+- Bot commands are deleted from the group about 3 seconds after they're sent.
+- `@all` / `@raidall name <link>` sent on their own are deleted too. A real message around them is left alone.
+- Short answers delete after 15 seconds; previews, lists, help and on-demand leaderboards after 1 minute.
+- The /register button deletes as soon as someone opens the bot through it, or after 15 seconds.
+- Setup prompts and the admin's template message are deleted once a template is saved.
+- The lock notice is removed when the chat unlocks.
+- Kept: the pinned raid message, summaries, and the weekly leaderboard.
 
 ## 5. Tracking (X API)
 

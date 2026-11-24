@@ -11,7 +11,7 @@ from telegram.ext import ContextTypes
 
 from . import core
 from .common import (
-    ANONYMOUS_ADMIN_BOT_ID, admin_ids, bot_link, get_db, is_admin, is_group, reply_temp, safe_delete,
+    MEDIUM, ANONYMOUS_ADMIN_BOT_ID, admin_ids, bot_link, get_db, is_admin, is_group, reply_temp, safe_delete,
 )
 from .utils import week_start
 
@@ -38,10 +38,10 @@ async def raidcsv_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         raids = [raid] if raid else []
         label = f"raid{raid['raid_no']}" if raid else ""
     else:
-        await reply_temp(context, msg, "Usage: /raidcsv, /raidcsv 3 or /raidcsv all", 30)
+        await reply_temp(context, msg, "Usage: /raidcsv, /raidcsv 3 or /raidcsv all")
         return
     if not raids:
-        await reply_temp(context, msg, "I couldn't find that raid.", 30)
+        await reply_temp(context, msg, "I couldn't find that raid.")
         return
 
     user = msg.from_user
@@ -64,11 +64,10 @@ async def raidcsv_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             context, msg,
             f'{user.mention_html()}, I can\'t message you yet. Open <a href="{bot_link(context)}">a chat with me</a>, '
             "press Start, then run /raidcsv again.",
-            30,
         )
     except TelegramError as e:
         log.warning("Couldn't send CSV: %s", e)
-        await reply_temp(context, msg, "Something went wrong sending the file. Try again.", 30)
+        await reply_temp(context, msg, "Something went wrong sending the file. Try again.")
 
 
 async def leaderboard_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -79,10 +78,7 @@ async def leaderboard_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     start = week_start(time.time())
     rows = core.leaderboard(get_db(context), msg.chat_id, start.timestamp(),
                             (start + timedelta(days=7)).timestamp())
-    await msg.reply_text(
-        core.leaderboard_html(rows, start.timestamp(), "Leaderboard this week"),
-        parse_mode=ParseMode.HTML,
-    )
+    await reply_temp(context, msg, core.leaderboard_html(rows, start.timestamp(), "Leaderboard this week"), MEDIUM)
 
 
 async def weekly_job(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -130,18 +126,25 @@ HELP_TEXT = """<b>Raid bot commands</b>
 
 <b>Admins: tagging and raids</b>
 @all: tag everyone (15 min cooldown, tags delete after 4h)
-@raidall: tag everyone, then post and pin the raid message
+@raidall: tag everyone, then post and pin the default raid message
+@raidall fun: same, using the template called fun
 /endraid: end a raid early
 /lock 15 60m: lock the chat until 15 members comment, or for 60 min
 /unlock: unlock the chat
 
+<b>Admins: templates</b>
+/settemplate: set the default raid template
+/settemplate fun: set a template called fun (send a photo with caption to attach an image)
+/templates: list all templates
+/template fun: preview a template
+/deltemplate fun: delete a template
+Variables: {link} {xname} {xhandle} {xprofile}
+
 <b>Admins: setup</b>
 /addusers @a @b: add people to the tag list
 /removeuser @a: remove someone from the tag list
-/members: who is and isn't registered
-/settemplate: set the raid message (use {link})
+/members: who is and isn't registered (sent privately)
 /setwelcome: set the welcome message (use {name})
-/template: preview both
 /welcome: post the welcome message
 
 <b>Admins: reports</b> (sent to you privately)
@@ -151,6 +154,6 @@ HELP_TEXT = """<b>Raid bot commands</b>
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     msg = update.effective_message
     if is_group(update):
-        await reply_temp(context, msg, HELP_TEXT, 120)
+        await reply_temp(context, msg, HELP_TEXT, MEDIUM)
     else:
         await msg.reply_text(HELP_TEXT, parse_mode=ParseMode.HTML)

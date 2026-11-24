@@ -10,6 +10,7 @@ FOR EVERYONE
 /register
     Link your X account and Verona address so your raid comments get counted.
     Typed in the group, it gives you a button that opens a private chat with the bot.
+    The button disappears as soon as you tap it, or after 15 seconds.
     The bot asks two things:
       1. Your X username or profile link (@name, name or x.com/name all work)
       2. Your Verona address (starts with xion1)
@@ -40,10 +41,13 @@ FOR ADMINS: TAGGING AND RAIDS
     /all does the same thing.
 
 @raidall
-    Same tagging as @all, then posts your raid message with the X link filled in
+@raidall fun
+    Same tagging as @all, then posts a raid template with the X link filled in
     and pins it with a notification to everyone.
+    @raidall on its own uses the default template. @raidall fun uses the
+    template called fun (see /settemplate below).
     The link is taken from, in this order:
-      1. the same message (example: @raidall https://x.com/name/status/123)
+      1. the same message (example: @raidall fun https://x.com/name/status/123)
       2. the message you're replying to
       3. the last X link you posted in the group (within 24 hours)
     A raid lasts 12 hours. While it runs, the bot checks the post's replies
@@ -78,21 +82,42 @@ FOR ADMINS: SETUP
 
 /members
     Shows how many members the bot knows, and who isn't registered yet.
+    Sent to you privately.
 
 /settemplate
-    Sets the raid message. The bot asks you to send the template next.
-    Put {link} where the X post link should go. Bold, italics and links are kept.
+/settemplate fun
+    Saves a raid template. Without a name it's the default template; with a name
+    (fun, bull, anything with letters, numbers or _) you get a named one.
+    The bot asks you to send it next:
+      - send plain text for a text-only template, or
+      - send a photo with the template as its caption, and that image is
+        attached every time this template is used.
+    Running it again with the same name replaces that template.
+    You can use these in the text:
+      {link}      the X post link (required)
+      {xname}     the X display name of whoever posted it, e.g. Andyyy
+      {xhandle}   their @handle, e.g. @andyyy
+      {xprofile}  a link to their X profile
     Example:
-        New post is live! Go comment and repost:
+        Our dear friend {xname} is posting, let's show him how Verona bulls are!
         {link}
+        Follow: {xprofile}
+    {xname} works even without the X API key.
+
+/templates
+    Lists every template and how to use it.
+
+/template fun
+    Shows a preview of a template (with an example post by Andyyy).
+    /template on its own previews the default one.
+
+/deltemplate fun
+    Deletes a template.
 
 /setwelcome
     Sets the welcome message for new members. The bot asks you to send it next.
     Put {name} where the new member's name should go. A Register button is added
     automatically.
-
-/template
-    Shows a preview of the raid message and the welcome message.
 
 /welcome
     Posts the welcome message. Reply to someone's message with /welcome to
@@ -125,6 +150,25 @@ Weekly leaderboard
     Posted in the group automatically every Monday (UTC).
     Every admin who has pressed Start on the bot also gets a private CSV of the
     top 5, with their Verona addresses, for sending rewards.
+
+
+KEEPING THE CHAT CLEAN
+----------------------
+- Every bot command (/addusers, /lock, /unlock, /raidcsv and so on) is deleted
+  from the group about 3 seconds after it's sent.
+- "@all" or "@raidall fun <link>" sent on their own are deleted the same way.
+  If you wrote a real message around them ("@all gm fam, call in 10"), your
+  message stays.
+- The bot's short answers (confirmations, errors, cooldown notes) delete after
+  15 seconds.
+- Previews, /templates, /help and /leaderboard answers delete after 1 minute.
+- The /settemplate and /setwelcome prompts, and the message you sent with the
+  template, are deleted once it's saved. You get a preview for 1 minute instead.
+- The "Chat locked" notice is removed when the chat unlocks.
+- Tag messages delete after 4 hours. Welcome messages delete when the person
+  registers, or after 24 hours.
+- What stays: the pinned raid message, raid and lock summaries, and the weekly
+  leaderboard.
 
 
 AUTOMATIC THINGS

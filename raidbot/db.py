@@ -98,7 +98,19 @@ CREATE TABLE IF NOT EXISTS scheduled_deletes (
     ref_user_id INTEGER
 );
 CREATE INDEX IF NOT EXISTS scheduled_deletes_due ON scheduled_deletes(delete_at);
+
+-- Named raid templates per group. photo_file_id is set when the template has an image.
+CREATE TABLE IF NOT EXISTS templates (
+    chat_id       INTEGER NOT NULL,
+    name          TEXT NOT NULL,
+    body_html     TEXT NOT NULL,
+    photo_file_id TEXT,
+    updated_at    REAL NOT NULL,
+    PRIMARY KEY (chat_id, name)
+);
 """
+
+DEFAULT_TEMPLATE = "default"
 
 _GROUP_FIELDS = {"title", "template_html", "welcome_html", "last_tag_at", "last_lb_week"}
 _RAID_FIELDS = {"conversation_id", "since_id", "last_checked_at", "message_id"}
@@ -111,7 +123,21 @@ class Database:
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA foreign_keys=ON")
         self.conn.executescript(SCHEMA)
+        self._migrate()
         self.conn.commit()
+
+    def _migrate(self) -> None:
+        """Bring databases made by older versions of the bot up to date."""
+        lock_cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(locks)")}
+        if "message_id" not in lock_cols:
+            self.conn.execute("ALTER TABLE locks ADD COLUMN message_id INTEGER")
+        # Single templates from the first version become the "default" template.
+        self.conn.execute(
+            "INSERT OR IGNORE INTO templates(chat_id, name, body_html, photo_file_id, updated_at) "
+            "SELECT chat_id, ?, template_html, NULL, ? FROM groups WHERE template_html IS NOT NULL",
+            (DEFAULT_TEMPLATE, time.time()),
+        )
+        self.conn.execute("UPDATE groups SET template_html = NULL WHERE template_html IS NOT NULL")
 
     def close(self) -> None:
         self.conn.close()
@@ -147,6 +173,29 @@ class Database:
             raise ValueError(field)
         self.ensure_group(chat_id)
         self._run(f"UPDATE groups SET {field} = ? WHERE chat_id = ?", (value, chat_id))
+
+    # ------------------------------------------------------------ templates
+
+    def save_template(self, chat_id: int, name: str, body_html: str, photo_file_id: str | None) -> None:
+        self.ensure_group(chat_id)
+        self._run(
+            "INSERT INTO templates(chat_id, name, body_html, photo_file_id, updated_at) VALUES(?, ?, ?, ?, ?) "
+            "ON CONFLICT(chat_id, name) DO UPDATE SET body_html = excluded.body_html, "
+            "photo_file_id = excluded.photo_file_id, updated_at = excluded.updated_at",
+            (chat_id, name.lower(), body_html, photo_file_id, time.time()),
+        )
+
+    def get_template(self, chat_id: int, name: str) -> sqlite3.Row | None:
+        return self._one("SELECT * FROM templates WHERE chat_id = ? AND name = ?", (chat_id, name.lower()))
+
+    def list_templates(self, chat_id: int) -> list[sqlite3.Row]:
+        return self._all(
+            "SELECT * FROM templates WHERE chat_id = ? ORDER BY name = ? DESC, name", (chat_id, DEFAULT_TEMPLATE)
+        )
+
+    def delete_template(self, chat_id: int, name: str) -> bool:
+        cur = self._run("DELETE FROM templates WHERE chat_id = ? AND name = ?", (chat_id, name.lower()))
+        return cur.rowcount == 1
 
     # ------------------------------------------------------------ users
 
@@ -412,6 +461,9 @@ class Database:
     def active_locks(self) -> list[sqlite3.Row]:
         return self._all("SELECT * FROM locks WHERE active = 1")
 
+    def set_lock_message(self, lock_id: int, message_id: int) -> None:
+        self._run("UPDATE locks SET message_id = ? WHERE id = ?", (message_id, lock_id))
+
     def lock_for_raid(self, raid_id: int) -> sqlite3.Row | None:
         return self._one("SELECT * FROM locks WHERE raid_id = ? AND active = 1", (raid_id,))
 
@@ -433,9 +485,21 @@ class Database:
     def due_deletes(self, now: float) -> list[sqlite3.Row]:
         return self._all("SELECT * FROM scheduled_deletes WHERE delete_at <= ? ORDER BY delete_at", (now,))
 
-    def welcome_messages_for(self, user_id: int) -> list[sqlite3.Row]:
+    def scheduled_for_user(self, kind: str, user_id: int, chat_id: int | None = None) -> list[sqlite3.Row]:
+        """Pending deletes of one kind tied to a person, e.g. their welcome message."""
+        if chat_id is None:
+            return self._all(
+                "SELECT * FROM scheduled_deletes WHERE kind = ? AND ref_user_id = ?", (kind, user_id)
+            )
         return self._all(
-            "SELECT * FROM scheduled_deletes WHERE kind = 'welcome' AND ref_user_id = ?", (user_id,)
+            "SELECT * FROM scheduled_deletes WHERE kind = ? AND ref_user_id = ? AND chat_id = ?",
+            (kind, user_id, chat_id),
+        )
+
+    def find_scheduled(self, chat_id: int, message_id: int, kind: str) -> sqlite3.Row | None:
+        return self._one(
+            "SELECT * FROM scheduled_deletes WHERE chat_id = ? AND message_id = ? AND kind = ?",
+            (chat_id, message_id, kind),
         )
 
     def remove_scheduled(self, row_id: int) -> None:

@@ -9,7 +9,7 @@ from telegram.error import TelegramError
 from telegram.ext import ContextTypes
 
 from . import core
-from .common import get_db, get_x, is_admin, is_group, reply_temp
+from .common import get_db, get_x, is_admin, is_group, reply_temp, safe_delete
 from .utils import format_duration, parse_duration
 
 log = logging.getLogger(__name__)
@@ -31,12 +31,12 @@ async def lock_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     db = get_db(context)
     args = context.args or []
     if len(args) != 2 or not args[0].isdigit() or int(args[0]) < 1:
-        await reply_temp(context, msg, USAGE, 60)
+        await reply_temp(context, msg, USAGE)
         return
     target = int(args[0])
     duration = parse_duration(args[1])
     if not duration:
-        await reply_temp(context, msg, "I didn't understand the time. Use something like 60m or 2h (max 24h).", 60)
+        await reply_temp(context, msg, "I didn't understand the time. Use something like 60m or 2h (max 24h).")
         return
     if db.active_lock(msg.chat_id):
         await reply_temp(context, msg, "The chat is already locked. Use /unlock first.")
@@ -59,10 +59,10 @@ async def lock_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
     except TelegramError as e:
         log.warning("Couldn't lock chat %s: %s", msg.chat_id, e)
-        await reply_temp(context, msg, "I couldn't lock the chat. Give me the 'Ban users' admin right and try again.", 60)
+        await reply_temp(context, msg, "I couldn't lock the chat. Give me the 'Ban users' admin right and try again.")
         return
 
-    db.create_lock(msg.chat_id, raid["id"], target, duration, prev)
+    lock = db.create_lock(msg.chat_id, raid["id"], target, duration, prev)
     text = (
         f"<b>Chat locked</b> for raid #{raid['raid_no']}.\n"
         f"It opens when {target} registered members have commented ({have} so far), "
@@ -71,7 +71,13 @@ async def lock_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
     if not get_x(context):
         text += "\n\nComment tracking is off (no X API key), so it will only open on the timer or with /unlock."
-    await msg.reply_text(text, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
+    try:
+        notice = await context.bot.send_message(
+            msg.chat_id, text, parse_mode=ParseMode.HTML, disable_web_page_preview=True
+        )
+        db.set_lock_message(lock["id"], notice.message_id)  # removed again when the chat unlocks
+    except TelegramError as e:
+        log.warning("Couldn't post lock notice in chat %s: %s", msg.chat_id, e)
 
 
 async def unlock_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -102,6 +108,8 @@ async def finish_lock(context: ContextTypes.DEFAULT_TYPE, lock, reason: str, pos
         return  # keep the lock active so the next check retries
     if not db.finish_lock(lock["id"], reason):
         return
+    if lock["message_id"]:
+        await safe_delete(context, chat_id, lock["message_id"])
     raid = db.get_raid(lock["raid_id"])
     if post_summary and raid:
         title = f"Chat unlocked: {reason}"

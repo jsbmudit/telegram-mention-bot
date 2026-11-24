@@ -16,11 +16,11 @@ from telegram import Update
 from telegram.ext import CallbackContext
 from telegram.request import BaseRequest
 
-from raidbot.app import build_app, housekeeping_job
+from raidbot.app import build_app, delete_job, housekeeping_job
 from raidbot.config import Config
 from raidbot.h_raid import tracking_job
 from raidbot.utils import bech32_encode, convert_bits
-from raidbot.xapi import Reply
+from raidbot.xapi import PostAuthor, Reply
 
 BOT_ID = 5000
 ADMIN = {"id": 1, "is_bot": False, "first_name": "Admin", "username": "boss"}
@@ -77,12 +77,18 @@ class FakeTelegram(BaseRequest):
             return {"id": BOT_ID, "is_bot": True, "first_name": "Raid", "username": "raid_test_bot",
                     "can_join_groups": True, "can_read_all_group_messages": True,
                     "supports_inline_queries": False}
-        if name in ("sendMessage", "sendDocument", "editMessageText", "editMessageReplyMarkup"):
+        if name in ("sendMessage", "sendDocument", "sendPhoto", "editMessageText", "editMessageReplyMarkup"):
             chat_id = int(p.get("chat_id", CHAT["id"]))
             chat = CHAT if chat_id < 0 else {"id": chat_id, "type": "private", "first_name": "x"}
-            return {"message_id": next(self.ids), "date": int(time.time()), "chat": chat,
-                    "from": {"id": BOT_ID, "is_bot": True, "first_name": "Raid"},
-                    "text": p.get("text", "")}
+            msg_id = int(p["message_id"]) if "message_id" in p else next(self.ids)
+            out = {"message_id": msg_id, "date": int(time.time()), "chat": chat,
+                   "from": {"id": BOT_ID, "is_bot": True, "first_name": "Raid"}}
+            if name == "sendPhoto":
+                out["photo"] = [{"file_id": str(p.get("photo")), "file_unique_id": "u", "width": 1, "height": 1}]
+                out["caption"] = p.get("caption", "")
+            else:
+                out["text"] = p.get("text", "")
+            return out
         if name == "getChatAdministrators":
             return [{"status": "creator", "user": ADMIN, "is_anonymous": False}]
         if name == "getChat":
@@ -105,6 +111,9 @@ class FakeX:
     async def get_conversation_id(self, tweet_id):
         return tweet_id
 
+    async def get_post_info(self, tweet_id):
+        return tweet_id, PostAuthor(name="Andyyy", username="andyyy")
+
     async def search_replies(self, conversation_id, since_id=None):
         return list(self.replies), None
 
@@ -112,8 +121,14 @@ class FakeX:
         pass
 
 
+async def _no_oembed(tweet_id, handle=None):
+    return None
+
+
 class Harness:
     def __init__(self, tmp_path):
+        import raidbot.h_raid
+        raidbot.h_raid.oembed_author = _no_oembed  # never call the real X embed service in tests
         self.tg = FakeTelegram()
         cfg = Config(telegram_token=FAKE_TOKEN, x_bearer_token=None, db_path=str(tmp_path / "bot.db"),
                      track_interval=600, lock_check_interval=120)
@@ -129,8 +144,10 @@ class Harness:
         self.ctx = CallbackContext(self.app)
 
     async def send(self, user, text, chat=CHAT, reply_to=None, edited=False, **extra):
-        msg = {"message_id": next(self.ids), "date": int(time.time()), "chat": chat, "from": user,
-               "text": text, **extra}
+        msg = {"message_id": next(self.ids), "date": int(time.time()), "chat": chat, "from": user, **extra}
+        if "photo" not in extra:
+            msg["text"] = text
+        self.last_id = msg["message_id"]
         if text.startswith("/"):
             msg["entities"] = [{"type": "bot_command", "offset": 0, "length": len(text.split()[0])}]
         if reply_to:
@@ -207,9 +224,9 @@ async def _full_raid_flow(tmp_path):
     # 4. Admin sets the raid template; one without {link} is refused.
     await h.send(ADMIN, "/settemplate")
     await h.send(ADMIN, "no link here")
-    assert db.get_group(CHAT["id"])["template_html"] is None
+    assert db.get_template(CHAT["id"], "default") is None
     await h.send(ADMIN, "RAID NOW {link} like and comment")
-    assert "{link}" in db.get_group(CHAT["id"])["template_html"]
+    assert "{link}" in db.get_template(CHAT["id"], "default")["body_html"]
 
     # 5. Admin posts the link, then @raidall: tags (registered first), raid message, pin.
     await h.send(ADMIN, f"new post {POST}?s=20")
@@ -317,3 +334,115 @@ def test_missing_token_message(tmp_path):
     assert r.returncode == 1
     assert "TELEGRAM_BOT_TOKEN is not set" in r.stderr
     assert "Traceback" not in r.stderr
+
+
+def test_cleanup_and_named_templates(tmp_path):
+    asyncio.run(_cleanup_and_named_templates(tmp_path))
+
+
+def _scheduled(db, message_id):
+    return db.conn.execute("SELECT * FROM scheduled_deletes WHERE message_id = ?", (message_id,)).fetchall()
+
+
+async def _cleanup_and_named_templates(tmp_path):
+    h = Harness(tmp_path)
+    tg, db = h.tg, h.db
+    await h.start()
+    chat_id = CHAT["id"]
+
+    # Admin commands and their names are removed from the chat a few seconds later.
+    await h.send(ADMIN, "/addusers @alice @bobby")
+    cmd_rows = _scheduled(db, h.last_id)
+    assert cmd_rows and cmd_rows[0]["delete_at"] - time.time() < 5
+    reply = [p for p in tg.of("sendMessage") if "Added" in p["text"]][0]
+    # The bot's answer goes too, after about 15 seconds.
+    assert len(db.due_deletes(time.time() + 16)) >= 2
+
+    # A command for some other bot is left alone.
+    await h.send(ADMIN, "/start@someotherbot")
+    assert _scheduled(db, h.last_id) == []
+
+    # /register: the prompt disappears when someone opens the bot through it.
+    tg.clear()
+    await h.send(ALICE, "/register")
+    edits = tg.of("editMessageReplyMarkup")
+    assert len(edits) == 1
+    markup = edits[0]["reply_markup"]
+    markup = json.loads(markup) if isinstance(markup, str) else markup
+    url = markup["inline_keyboard"][0][0]["url"]
+    payload = url.split("?start=")[1]
+    prompt_id = int(edits[0]["message_id"])
+    assert payload == f"reg{chat_id}_{prompt_id}"
+    tg.clear()
+    await h.dm(ALICE, f"/start {payload}")
+    assert [int(p["message_id"]) for p in tg.of("deleteMessage")] == [prompt_id]
+    await h.dm(ALICE, "/cancel")
+    # A hand-made link can't make the bot delete other messages.
+    tg.clear()
+    await h.dm(ALICE, f"/start reg{chat_id}_5")
+    assert tg.of("deleteMessage") == []
+    await h.dm(ALICE, "/cancel")
+
+    # Named template with an image and {xname}/{xprofile}.
+    await h.send(ADMIN, "/settemplate fun")
+    tg.clear()
+    await h.send(ADMIN, "", photo=[{"file_id": "PHOTO_FUN", "file_unique_id": "pf", "width": 9, "height": 9}],
+                 caption="Our dear friend {xname} is posting, show him how Verona bulls are! {link} {xprofile}")
+    tpl = db.get_template(chat_id, "fun")
+    assert tpl["photo_file_id"] == "PHOTO_FUN"
+    # The setup prompt and the admin's own template message get cleaned up.
+    assert _scheduled(db, h.last_id)
+    previews = tg.of("sendPhoto")
+    assert previews and "Andyyy" in previews[0]["caption"]
+
+    await h.send(ADMIN, "/settemplate")
+    await h.send(ADMIN, "Plain raid {link}")
+    assert db.get_template(chat_id, "default")
+
+    # Unknown template name: a short error, nothing posted.
+    tg.clear()
+    await h.send(ADMIN, "@raidall nope")
+    assert any("no template called nope" in t for t in tg.texts())
+    assert tg.of("sendPhoto") == [] and tg.of("pinChatMessage") == []
+
+    # @raidall fun <link>: tags, then the image with the filled-in caption, pinned.
+    tg.clear()
+    await h.send(ADMIN, "@raidall fun https://x.com/andyyy/status/1861234567890555555")
+    trigger_id = h.last_id
+    photos = tg.of("sendPhoto")
+    assert len(photos) == 1 and photos[0]["photo"] == "PHOTO_FUN"
+    caption = photos[0]["caption"]
+    assert "Our dear friend Andyyy is posting" in caption
+    assert "https://x.com/andyyy/status/1861234567890555555" in caption and "https://x.com/andyyy " not in caption
+    assert "https://x.com/andyyy" in caption
+    raid = db.latest_raid(chat_id)
+    assert [int(p["message_id"]) for p in tg.of("pinChatMessage")] == [raid["message_id"]]
+    # "@raidall fun <link>" on its own is a pure command, so it gets tidied away.
+    assert _scheduled(db, trigger_id)
+
+    # "@all" with a real message around it is left alone.
+    db.set_group(chat_id, "last_tag_at", 0)
+    await h.send(ADMIN, "@all gm fam, call in 10")
+    assert _scheduled(db, h.last_id) == []
+
+    # Lock notice is removed when the chat unlocks; the summary stays.
+    tg.clear()
+    await h.send(ADMIN, "/lock 5 30m")
+    notice_id = db.active_lock(chat_id)["message_id"]
+    assert notice_id
+    tg.clear()
+    await h.send(ADMIN, "/unlock")
+    assert notice_id in [int(p["message_id"]) for p in tg.of("deleteMessage")]
+    summary = tg.texts()[-1]
+    assert "Chat unlocked" in summary
+    assert all(r["message_id"] != notice_id for r in db.due_deletes(time.time() + 10 ** 6))
+
+    # The fast delete job actually removes due messages.
+    db.conn.execute("UPDATE scheduled_deletes SET delete_at = 0 WHERE kind = 'temp'")
+    db.conn.commit()
+    tg.clear()
+    await delete_job(h.ctx)
+    assert tg.of("deleteMessage")
+    assert db.conn.execute("SELECT COUNT(*) FROM scheduled_deletes WHERE kind = 'temp'").fetchone()[0] == 0
+
+    await h.app.shutdown()

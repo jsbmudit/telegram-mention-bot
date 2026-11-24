@@ -49,6 +49,29 @@ def _parse_time(value: str | None, tweet_id: str) -> float:
     return tweet_id_to_timestamp(tweet_id)
 
 
+@dataclass
+class PostAuthor:
+    name: str | None
+    username: str | None
+
+
+async def oembed_author(tweet_id: str, handle: str | None = None) -> PostAuthor | None:
+    """The post author's display name from X's public embed service. No API key needed."""
+    post_url = f"https://twitter.com/{handle or 'i'}/status/{tweet_id}"
+    try:
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+            r = await client.get("https://publish.twitter.com/oembed",
+                                 params={"url": post_url, "omit_script": "1"})
+        if r.status_code != 200:
+            return None
+        data = r.json()
+    except (httpx.HTTPError, ValueError):
+        return None
+    author_url = data.get("author_url") or ""
+    username = author_url.rstrip("/").rsplit("/", 1)[-1] or None
+    return PostAuthor(name=data.get("author_name") or None, username=username)
+
+
 class XClient:
     def __init__(self, bearer_token: str, base_url: str = "https://api.x.com/2"):
         self._client = httpx.AsyncClient(
@@ -90,6 +113,24 @@ class XClient:
         if not user:
             return None
         return str(user["id"]), user["username"]
+
+    async def get_post_info(self, tweet_id: str) -> tuple[str | None, PostAuthor | None]:
+        """(conversation_id, author) for a post, in one request."""
+        try:
+            data = await self._get(f"/tweets/{tweet_id}", {
+                "tweet.fields": "conversation_id,author_id",
+                "expansions": "author_id",
+                "user.fields": "name,username",
+            })
+        except XNotFound:
+            return None, None
+        tweet = data.get("data") or {}
+        users = (data.get("includes") or {}).get("users") or []
+        author = None
+        for u in users:
+            if u.get("id") == tweet.get("author_id"):
+                author = PostAuthor(name=u.get("name"), username=u.get("username"))
+        return tweet.get("conversation_id"), author
 
     async def get_conversation_id(self, tweet_id: str) -> str | None:
         try:

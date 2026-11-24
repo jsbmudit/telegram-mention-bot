@@ -97,3 +97,15 @@ def test_leaderboard_points_and_streaks(tmp_path):
     assert rows[1]["points"] == 3 and rows[1]["streak"] == 1
     top = core.top_csv(rows).decode("utf-8-sig")
     assert wallet(1) in top and top.count("\n") == 3
+
+
+def test_old_single_template_becomes_default(tmp_path):
+    path = str(tmp_path / "old.db")
+    db = Database(path)
+    db.ensure_group(CHAT, "Test")
+    db.conn.execute("UPDATE groups SET template_html = 'Old raid {link}' WHERE chat_id = ?", (CHAT,))
+    db.conn.commit()
+    db.close()
+    db = Database(path)  # reopening runs the upgrade
+    assert db.get_template(CHAT, "default")["body_html"] == "Old raid {link}"
+    assert db.get_group(CHAT)["template_html"] is None

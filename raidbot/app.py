@@ -10,7 +10,7 @@ from telegram.ext import (
     MessageHandler, filters,
 )
 
-from .common import get_db, safe_delete
+from .common import delete_later, get_db, is_group, safe_delete
 from .config import Config
 from .db import Database
 from .h_lock import finish_lock, lock_cmd, unlock_cmd
@@ -23,7 +23,7 @@ from .h_raid import (
 )
 from .h_register import build_register_handler, me_cmd, register_in_group
 from .h_reports import help_cmd, leaderboard_cmd, raidcsv_cmd, weekly_job
-from .h_settings import build_settings_handler, template_cmd
+from .h_settings import build_settings_handler, deltemplate_cmd, template_cmd, templates_cmd
 from .xapi import XClient
 
 log = logging.getLogger(__name__)
@@ -39,9 +39,11 @@ GROUP_COMMANDS = [
     BotCommand("addusers", "Admins: add @usernames to the tag list"),
     BotCommand("removeuser", "Admins: remove someone from the tag list"),
     BotCommand("members", "Admins: who is registered"),
-    BotCommand("settemplate", "Admins: set the raid message"),
+    BotCommand("settemplate", "Admins: set a raid template, e.g. /settemplate fun"),
+    BotCommand("templates", "Admins: list raid templates"),
+    BotCommand("template", "Admins: preview a template, e.g. /template fun"),
+    BotCommand("deltemplate", "Admins: delete a template"),
     BotCommand("setwelcome", "Admins: set the welcome message"),
-    BotCommand("template", "Admins: preview messages"),
     BotCommand("welcome", "Admins: post the welcome message"),
     BotCommand("raidcsv", "Admins: get a raid report privately"),
     BotCommand("help", "All commands"),
@@ -54,13 +56,38 @@ PRIVATE_COMMANDS = [
 ]
 
 
-async def housekeeping_job(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Runs every minute: scheduled deletes, raid and lock timers, cleanup."""
+# Every command this bot answers in groups. These get removed from the chat
+# a few seconds after they're sent, so the group stays clean.
+OUR_GROUP_COMMANDS = {c.command for c in GROUP_COMMANDS} | {
+    "allraid", "cancel", "me", "deltemplate", "templates",
+}
+
+
+async def cleanup_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Runs before everything else for group commands: schedule the command for deletion."""
+    msg = update.effective_message
+    if not is_group(update) or not msg or not msg.text or not msg.text.startswith("/"):
+        return
+    word = msg.text.split()[0][1:]
+    name, _, target = word.partition("@")
+    if target and target.lower() != (context.bot.username or "").lower():
+        return  # a command for a different bot
+    if name.lower() in OUR_GROUP_COMMANDS:
+        delete_later(context, msg.chat_id, msg.message_id)
+
+
+async def delete_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Runs every few seconds: deletes messages whose time is up."""
     db = get_db(context)
-    now = time.time()
-    for row in db.due_deletes(now):
+    for row in db.due_deletes(time.time()):
         await safe_delete(context, row["chat_id"], row["message_id"])
         db.remove_scheduled(row["id"])
+
+
+async def housekeeping_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Runs every minute: raid and lock timers, cleanup."""
+    db = get_db(context)
+    now = time.time()
     for raid in db.active_raids():
         if raid["ends_at"] <= now:
             await end_raid(context, raid, "12 hours passed")
@@ -111,6 +138,8 @@ def build_app(cfg: Config, request=None, rate_limit: bool = True) -> Application
     groups = filters.ChatType.GROUPS & new_msg
     private = filters.ChatType.PRIVATE & new_msg
 
+    # Group -2 runs first: tidy away our commands a few seconds after they're sent.
+    app.add_handler(MessageHandler(groups & filters.COMMAND, cleanup_command), group=-2)
     # Group -1 sees every group message first, to keep the member list and links current.
     app.add_handler(MessageHandler(groups & ~filters.StatusUpdate.ALL, track_message), group=-1)
 
@@ -125,7 +154,8 @@ def build_app(cfg: Config, request=None, rate_limit: bool = True) -> Application
     commands = {
         "all": all_cmd, "raidall": raidall_cmd, "allraid": raidall_cmd, "endraid": endraid_cmd,
         "lock": lock_cmd, "unlock": unlock_cmd, "addusers": addusers_cmd, "removeuser": removeuser_cmd,
-        "members": members_cmd, "template": template_cmd, "welcome": welcome_cmd, "raidcsv": raidcsv_cmd,
+        "members": members_cmd, "template": template_cmd, "templates": templates_cmd,
+        "deltemplate": deltemplate_cmd, "welcome": welcome_cmd, "raidcsv": raidcsv_cmd,
     }
     for name, fn in commands.items():
         app.add_handler(CommandHandler(name, fn, filters=groups))
@@ -141,6 +171,7 @@ def build_app(cfg: Config, request=None, rate_limit: bool = True) -> Application
     app.add_error_handler(on_error)
 
     jq = app.job_queue
+    jq.run_repeating(delete_job, interval=5, first=5, name="deletes")
     jq.run_repeating(housekeeping_job, interval=60, first=10, name="housekeeping")
     jq.run_repeating(tracking_job, interval=60, first=30, name="tracking")
     jq.run_repeating(weekly_job, interval=3600, first=60, name="weekly")

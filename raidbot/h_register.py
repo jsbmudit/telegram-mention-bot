@@ -2,16 +2,17 @@
 
 import html
 import logging
-import time
+import re
 import warnings
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
+from telegram.error import TelegramError
 from telegram.ext import (
     CallbackQueryHandler, CommandHandler, ContextTypes, ConversationHandler, MessageHandler, filters,
 )
 
-from .common import bot_link, get_db, get_x, safe_delete
+from .common import bot_link, delete_later, get_db, get_x, safe_delete
 from .utils import normalize_x_handle, validate_xion_address
 from .xapi import XApiError
 from telegram.warnings import PTBUserWarning
@@ -25,24 +26,45 @@ log = logging.getLogger(__name__)
 ASK_X, ASK_WALLET, CONFIRM = range(3)
 
 
+REGISTER_PROMPT_SECONDS = 15
+_PROMPT_PAYLOAD_RE = re.compile(r"^reg(-?\d+)_(\d+)$")
+
+
 async def register_in_group(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/register typed in a group: point the person to a private chat with the bot."""
+    """/register typed in a group: point the person to a private chat with the bot.
+
+    The button's link carries this message's ID, so the moment someone opens
+    the private chat through it, the prompt is deleted from the group.
+    Otherwise it deletes itself after 15 seconds.
+    """
     msg = update.effective_message
-    button = InlineKeyboardMarkup([[InlineKeyboardButton("Register", url=bot_link(context, "register"))]])
-    sent = await msg.reply_text(
-        "Tap the button to register in a private chat with me. It takes 30 seconds.",
-        reply_markup=button,
-    )
-    db = get_db(context)
-    later = time.time() + 5 * 60
-    db.schedule_delete(msg.chat_id, sent.message_id, later, "temp")
-    db.schedule_delete(msg.chat_id, msg.message_id, later, "temp")
+    try:
+        sent = await context.bot.send_message(
+            msg.chat_id, "Tap the button to register in a private chat with me. It takes 30 seconds.",
+        )
+        link = bot_link(context, f"reg{msg.chat_id}_{sent.message_id}")
+        await sent.edit_reply_markup(InlineKeyboardMarkup([[InlineKeyboardButton("Register", url=link)]]))
+    except TelegramError as e:
+        log.warning("Couldn't post the register button in chat %s: %s", msg.chat_id, e)
+        return
+    delete_later(context, msg.chat_id, sent.message_id, REGISTER_PROMPT_SECONDS, kind="register_prompt")
 
 
 async def start_private(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user = update.effective_user
     get_db(context).upsert_user_profile(user.id, user.username, user.first_name)
-    if context.args and context.args[0] == "register":
+    payload = context.args[0] if context.args else ""
+    m = _PROMPT_PAYLOAD_RE.match(payload)
+    if m:
+        # Only delete it if it really is one of our register prompts. The link
+        # text can be edited by anyone, so never trust it on its own.
+        chat_id, message_id = int(m.group(1)), int(m.group(2))
+        row = get_db(context).find_scheduled(chat_id, message_id, "register_prompt")
+        if row:
+            await safe_delete(context, chat_id, message_id)
+            get_db(context).remove_scheduled(row["id"])
+        return await begin(update, context)
+    if payload == "register":
         return await begin(update, context)
     await update.effective_message.reply_text(
         "Hi! I run raids in your Telegram group.\n\n"
@@ -162,7 +184,7 @@ async def confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     db.link_username_everywhere(user.id, user.username, user.full_name)
 
     # Their welcome message has done its job.
-    for row in db.welcome_messages_for(user.id):
+    for row in db.scheduled_for_user("welcome", user.id):
         await safe_delete(context, row["chat_id"], row["message_id"])
         db.remove_scheduled(row["id"])
 

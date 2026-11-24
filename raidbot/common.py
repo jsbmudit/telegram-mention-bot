@@ -78,19 +78,36 @@ async def safe_delete(context: ContextTypes.DEFAULT_TYPE, chat_id: int, message_
         return False
 
 
-async def reply_temp(context: ContextTypes.DEFAULT_TYPE, message: Message, text: str,
-                     seconds: int = 30, **kwargs) -> Message | None:
-    """Reply in the group and have the reply delete itself later."""
+# How long the bot's short-lived messages stay in the group.
+SHORT = 15      # confirmations, errors, usage hints
+MEDIUM = 60     # previews, lists, help, leaderboard on demand
+COMMAND_DELETE_DELAY = 3  # admin commands disappear after this many seconds
+
+
+async def send_temp(context: ContextTypes.DEFAULT_TYPE, chat_id: int, text: str,
+                    seconds: int = SHORT, kind: str = "temp", ref_user_id: int | None = None,
+                    **kwargs) -> Message | None:
+    """Send a group message that deletes itself later."""
+    kwargs.setdefault("parse_mode", ParseMode.HTML)
+    kwargs.setdefault("disable_web_page_preview", True)
     try:
-        sent = await context.bot.send_message(
-            message.chat_id, text, parse_mode=ParseMode.HTML,
-            disable_web_page_preview=True, **kwargs,
-        )
+        sent = await context.bot.send_message(chat_id, text, **kwargs)
     except TelegramError as e:
-        log.warning("Couldn't send message in chat %s: %s", message.chat_id, e)
+        log.warning("Couldn't send message in chat %s: %s", chat_id, e)
         return None
-    get_db(context).schedule_delete(message.chat_id, sent.message_id, time.time() + seconds, "temp")
+    get_db(context).schedule_delete(chat_id, sent.message_id, time.time() + seconds, kind, ref_user_id)
     return sent
+
+
+async def reply_temp(context: ContextTypes.DEFAULT_TYPE, message: Message, text: str,
+                     seconds: int = SHORT, **kwargs) -> Message | None:
+    """Answer a group message with a message that deletes itself later."""
+    return await send_temp(context, message.chat_id, text, seconds, **kwargs)
+
+
+def delete_later(context: ContextTypes.DEFAULT_TYPE, chat_id: int, message_id: int,
+                 seconds: float = COMMAND_DELETE_DELAY, kind: str = "temp") -> None:
+    get_db(context).schedule_delete(chat_id, message_id, time.time() + seconds, kind)
 
 
 def message_links(message: Message | None) -> list[tuple[str, str]]:

@@ -219,5 +219,29 @@ def csv_safe(value) -> str:
     return s
 
 
-def render_template(template_html: str, url: str) -> str:
-    return template_html.replace("{link}", html.escape(url))
+TEMPLATE_NAME_RE = re.compile(r"[a-z0-9_]{1,20}")
+
+
+def valid_template_name(name: str) -> bool:
+    return bool(TEMPLATE_NAME_RE.fullmatch(name or ""))
+
+
+def render_template(template_html: str, url: str, xname: str | None = None,
+                    xhandle: str | None = None) -> str:
+    """Fill in {link}, {xname} (X display name), {xhandle} (@handle) and {xprofile} (profile link)."""
+    handle = xhandle or ""
+    values = {
+        "{link}": html.escape(url),
+        "{xname}": html.escape(xname or handle or "our friend"),
+        "{xhandle}": html.escape("@" + handle) if handle else "",
+        "{xprofile}": html.escape(f"https://x.com/{handle}") if handle else "",
+    }
+    for key, value in values.items():
+        template_html = template_html.replace(key, value)
+    return template_html
+
+
+def handle_from_post_url(url: str) -> str | None:
+    m = X_STATUS_RE.search(url or "")
+    user = m.group("user") if m else None
+    return user if user and user.lower() != "i" else None
