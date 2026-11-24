@@ -55,7 +55,7 @@ FOR ADMINS: TAGGING AND RAIDS
       2. the message you're replying to
       3. the last X link you posted in the group (within 24 hours)
     A raid lasts 12 hours. While it runs, the bot checks the post's replies
-    every 10 minutes and counts comments from registered members only.
+    every 2 minutes and counts comments from registered members only.
     @allraid, /raidall and /allraid do the same thing.
 
 /endraid
@@ -66,8 +66,8 @@ FOR ADMINS: TAGGING AND RAIDS
     Locks the chat for everyone except admins until 15 registered members have
     commented on the latest raid, or until 60 minutes pass, whichever comes first.
     Pick any numbers, for example /raidlock 10 30m, /raidlock 20 2h, /raidlock 30 90m.
-    Only works while a raid is running. While locked, the bot checks for comments
-    every 2 minutes. The group's normal permissions come back exactly as they were.
+    Only works while a raid is running. The bot checks for comments every
+    2 minutes. The group's normal permissions come back exactly as they were.
 
 /raidunlock
     Unlocks the chat early.

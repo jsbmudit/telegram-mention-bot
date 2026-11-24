@@ -203,12 +203,12 @@ class XClient:
         Returns (replies, newest_id). Uses recent search, which covers 7 days,
         plenty for a 12 hour raid.
         """
+        # No author profiles are requested: X may bill each profile as a user
+        # read. Replies are matched to members by X account ID instead.
         params = {
             "query": f"conversation_id:{conversation_id} is:reply",
             "max_results": 100,
             "tweet.fields": "author_id,created_at,conversation_id",
-            "expansions": "author_id",
-            "user.fields": "username",
         }
         if since_id:
             params["since_id"] = since_id
@@ -219,13 +219,12 @@ class XClient:
             meta = data.get("meta") or {}
             if newest_id is None and meta.get("newest_id"):
                 newest_id = meta["newest_id"]
-            users = {u["id"]: u.get("username") for u in (data.get("includes") or {}).get("users", [])}
             for t in data.get("data") or []:
                 replies.append(
                     Reply(
                         tweet_id=str(t["id"]),
                         author_id=str(t["author_id"]),
-                        author_username=users.get(t["author_id"]),
+                        author_username=None,
                         created_at=_parse_time(t.get("created_at"), str(t["id"])),
                     )
                 )

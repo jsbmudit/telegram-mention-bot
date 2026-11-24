@@ -67,7 +67,7 @@ def test_record_replies_only_registered_group_members(tmp_path):
     assert core.record_replies(db, raid, replies) == 2
     eng = {e["user_id"]: e for e in db.engagements(raid["id"])}
     assert eng[1]["reply_tweet_id"] == "602"
-    assert eng[2]["reply_url"] == "https://x.com/bobx/status/603"
+    assert eng[2]["reply_url"] == "https://x.com/BobX/status/603"  # built from the registered handle
     assert db.get_user(2)["x_user_id"] == "222"
 
     text = core.raid_summary_html(db, raid, "Done", tracking_on=True)
@@ -109,3 +109,14 @@ def test_old_single_template_becomes_default(tmp_path):
     db = Database(path)  # reopening runs the upgrade
     assert db.get_template(CHAT, "default")["body_html"] == "Old raid {link}"
     assert db.get_group(CHAT)["template_html"] is None
+
+
+def test_replies_matched_by_x_id_without_author_profiles(tmp_path):
+    db = setup_db(tmp_path)
+    db.upsert_user_profile(1, "alice", "Alice")
+    db.upsert_member(CHAT, 1, "alice", "Alice")
+    db.register_user(1, "alice", "Alice", "AliceX", "111", wallet(1))
+    raid = db.create_raid(CHAT, "500", "https://x.com/p/status/500", 1, 3600, 10)
+    replies = [Reply("701", "111", None, raid["started_at"] + 5), Reply("702", "999", None, raid["started_at"] + 6)]
+    assert core.record_replies(db, raid, replies) == 1
+    assert db.engagements(raid["id"])[0]["reply_url"] == "https://x.com/AliceX/status/701"

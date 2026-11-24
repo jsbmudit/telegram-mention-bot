@@ -28,7 +28,7 @@ The bot reads its secrets from environment variables only. Never put them in fil
 | `TELEGRAM_BOT_TOKEN` | yes | The bot token from BotFather |
 | `X_BEARER_TOKEN` | for tracking | X API bearer token. Without it, raids work but comments aren't tracked |
 | `DB_PATH` | no | Where to keep the database (default `raidbot.db`) |
-| `TRACK_INTERVAL_MINUTES` | no | How often to check replies during a raid (default 10) |
+| `TRACK_INTERVAL_MINUTES` | no | How often to check replies during a raid (default 2) |
 | `LOCK_CHECK_INTERVAL_MINUTES` | no | How often to check replies while the chat is locked (default 2) |
 | `FEED_INTERVAL_MINUTES` | no | How often to check followed X accounts for new posts (default 5) |
 
@@ -50,6 +50,13 @@ For local testing you can put the variables in a `.env` file (see `.env.example`
 `.gitignore`, so it never gets pushed.
 
 The X API plan needs to include reading posts, user timelines and recent search. The Free plan can't read replies or timelines.
+
+## X API cost
+
+X bills per post returned ($0.005 per post read at the time of writing), not per check. Each reply is
+fetched once, so a raid costs about $0.005 times the number of replies the post gets. A `/register`
+costs one profile read ($0.01). An X feed costs $0.005 per new post. Check the X Developer Console
+after the first real raid to confirm.
 
 ## Tests
 

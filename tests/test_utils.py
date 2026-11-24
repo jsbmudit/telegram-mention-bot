@@ -92,3 +92,41 @@ def test_log_redaction():
     # Even a token we weren't told about is caught by its shape.
     rec2 = logging.LogRecord("t", logging.INFO, "", 0, "987654321:" + "ZZZ-another" + "x" * 30, (), None)
     assert "ZZZ-another" not in fmt.format(rec2)
+
+
+def test_reply_search_asks_for_no_author_profiles():
+    """X may bill each returned profile as a user read, so the reply search must not ask for them."""
+    import asyncio
+    import httpx
+    from raidbot.xapi import XClient
+
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(dict(request.url.params))
+        return httpx.Response(200, json={
+            "data": [{"id": "9", "author_id": "111", "created_at": "2026-11-24T10:00:00.000Z"}],
+            "meta": {"newest_id": "9", "result_count": 1},
+        })
+
+    async def run():
+        client = XClient("unused")
+        await client._client.aclose()
+        client._client = httpx.AsyncClient(base_url="https://api.x.com/2", transport=httpx.MockTransport(handler))
+        replies, newest = await client.search_replies("500", since_id="8")
+        await client.close()
+        return replies, newest
+
+    replies, newest = asyncio.run(run())
+    assert newest == "9" and replies[0].author_id == "111"
+    assert "expansions" not in seen[0] and "user.fields" not in seen[0]
+    assert seen[0]["since_id"] == "8"
+
+
+def test_default_check_intervals(monkeypatch):
+    from raidbot.config import load_config
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "x" * 10)  # placeholder, not a token
+    for name in ("TRACK_INTERVAL_MINUTES", "LOCK_CHECK_INTERVAL_MINUTES", "FEED_INTERVAL_MINUTES"):
+        monkeypatch.delenv(name, raising=False)
+    cfg = load_config()
+    assert cfg.track_interval == 120 and cfg.lock_check_interval == 120 and cfg.feed_interval == 300

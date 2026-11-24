@@ -63,7 +63,7 @@ def load_config() -> Config:
         telegram_token=token,
         x_bearer_token=x_token,
         db_path=os.environ.get("DB_PATH", "").strip() or "raidbot.db",
-        track_interval=max(60, _int_env("TRACK_INTERVAL_MINUTES", 10) * 60),
+        track_interval=max(60, _int_env("TRACK_INTERVAL_MINUTES", 2) * 60),
         lock_check_interval=max(60, _int_env("LOCK_CHECK_INTERVAL_MINUTES", 2) * 60),
         feed_interval=max(60, _int_env("FEED_INTERVAL_MINUTES", 5) * 60),
     )

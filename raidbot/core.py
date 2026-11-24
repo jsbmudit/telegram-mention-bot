@@ -38,10 +38,11 @@ def build_tag_messages(db: Database, chat_id: int, batch_size: int = 5,
 
 def record_replies(db: Database, raid, replies: list[Reply]) -> int:
     """Credit replies to registered members of the raid's group. Returns new count."""
-    by_x_id, by_handle = {}, {}
+    by_x_id, by_handle, handles = {}, {}, {}
     for m in db.list_members(raid["chat_id"]):
         if not m["registered"] or m["user_id"] is None:
             continue
+        handles[m["user_id"]] = m["x_handle"]
         if m["x_user_id"]:
             by_x_id[m["x_user_id"]] = m["user_id"]
         if m["x_handle"]:
@@ -60,12 +61,21 @@ def record_replies(db: Database, raid, replies: list[Reply]) -> int:
                     by_x_id[r.author_id] = user_id
         if user_id is None:
             continue  # not a registered member of this group
-        if db.add_engagement(raid["id"], user_id, r.tweet_id, r.url, r.created_at):
+        handle = handles.get(user_id)
+        url = f"https://x.com/{handle}/status/{r.tweet_id}" if handle else r.url
+        if db.add_engagement(raid["id"], user_id, r.tweet_id, url, r.created_at):
             new += 1
     return new
 
 
 # ---------------------------------------------------------------- summaries
+
+def members_missing_x_id(db: Database, chat_id: int) -> list:
+    """Registered members whose X account ID isn't known yet (they registered
+    before the X key was set). Replies can only be matched by ID."""
+    return [m for m in db.list_members(chat_id)
+            if m["registered"] and m["user_id"] is not None and not m["x_user_id"] and m["x_handle"]]
+
 
 def raid_summary_html(db: Database, raid, title: str, tracking_on: bool, max_names: int = 40) -> str:
     lines = [f"<b>{title}</b>", f"Raid #{raid['raid_no']}: {raid['url']}"]

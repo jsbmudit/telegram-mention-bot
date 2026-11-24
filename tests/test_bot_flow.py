@@ -107,6 +107,7 @@ class FakeX:
         self.users = {"alicex": ("111", "AliceX"), "bobx": ("222", "BobX")}
 
     async def get_user(self, username):
+        self.user_lookups = getattr(self, "user_lookups", 0) + 1
         return self.users.get(username.lower())
 
     async def get_conversation_id(self, tweet_id):
@@ -127,6 +128,7 @@ class FakeX:
         return sorted(posts, key=lambda p: -int(p.id))[:max_results]
 
     async def get_post_info(self, tweet_id):
+        self.post_info_calls = getattr(self, "post_info_calls", 0) + 1
         return tweet_id, PostAuthor(name="Andyyy", username="andyyy")
 
     async def search_replies(self, conversation_id, since_id=None):
@@ -531,5 +533,44 @@ async def _x_feed_and_rose_names(tmp_path):
     assert any("@VeronaOfficial" in t for t in tg.texts())
     await h.send(ADMIN, "/feedoff @VeronaOfficial")
     assert db.feeds_for_chat(chat_id) == []
+
+    await h.app.shutdown()
+
+
+def test_cost_savers(tmp_path):
+    asyncio.run(_cost_savers(tmp_path))
+
+
+async def _cost_savers(tmp_path):
+    import raidbot.h_raid as h_raid
+    h = Harness(tmp_path)
+    tg, db = h.tg, h.db
+    await h.start()
+    chat_id = CHAT["id"]
+
+    # Bob registered before the X key existed: no X account ID stored.
+    await h.send(BOB, "hi")
+    db.register_user(BOB["id"], "bobby", "Bob", "BobX", None, wallet(5))
+    db.save_template(chat_id, "default", "Raid {xname} {link}", None)
+
+    # Raid start: the free embed lookup gives the name, so no paid profile read.
+    async def free_name(tweet_id, handle=None):
+        return PostAuthor(name="Verona", username="VeronaOfficial")
+    h_raid.oembed_author = free_name
+    await h.send(ADMIN, "@raidall https://x.com/VeronaOfficial/status/1861234567890777777")
+    assert getattr(h.x, "post_info_calls", 0) == 0
+    assert any("Raid Verona https://x.com/VeronaOfficial/status/1861234567890777777" in t for t in tg.texts())
+    raid = db.latest_raid(chat_id)
+    assert raid["conversation_id"] == "1861234567890777777"
+
+    # First check looks Bob's X ID up once, then matches his reply by ID alone.
+    h.x.replies = [Reply("9100", "222", None, raid["started_at"] + 42)]
+    await tracking_job(h.ctx)
+    assert db.get_user(BOB["id"])["x_user_id"] == "222"
+    assert db.engagements(raid["id"])[0]["reply_url"] == "https://x.com/BobX/status/9100"
+    lookups = h.x.user_lookups
+    db.update_raid(raid["id"], last_checked_at=0)
+    await tracking_job(h.ctx)
+    assert h.x.user_lookups == lookups  # not looked up again
 
     await h.app.shutdown()

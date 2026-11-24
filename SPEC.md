@@ -69,7 +69,9 @@ Status: built. Hosting will be decided next. Every command is explained in COMMA
 
 ## 5. Tracking (X API)
 
-- While a raid is live, the bot checks the post's replies every 10 minutes. While the chat is locked, it checks every 2 minutes so the chat opens soon after the target is hit. Both can be changed with environment variables.
+- While a raid is live, the bot checks the post's replies every 2 minutes (`TRACK_INTERVAL_MINUTES`). X bills per post returned, and each reply is fetched only once, so frequent checks shouldn't add cost. Confirm this on the X Developer Console after the first real raid.
+- Replies are matched to members by X account ID only; the search doesn't ask X for author profiles, which may be billed as user reads. Members who registered before the X key was set get their ID looked up once.
+- The post author's name for `{xname}` comes from X's free embed service first; the paid API is only used if that fails.
 - Only registered members count. Replies from outsiders are ignored.
 - Any reply in the post's thread counts, but only one per person. The time of their first reply is used.
 - Each person's response time is saved, for example "2m 14s after the raid started".

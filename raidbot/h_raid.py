@@ -4,6 +4,7 @@ import asyncio
 import html
 import logging
 import re
+import sqlite3
 import time
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
@@ -152,17 +153,22 @@ async def _run_tagging(context: ContextTypes.DEFAULT_TYPE, chat_id: int, started
 async def lookup_author(context: ContextTypes.DEFAULT_TYPE, tweet_id: str, url: str):
     """Who posted the raid post: (conversation_id, display name, handle).
 
-    Uses the X API when a key is set, otherwise X's public embed service.
+    The name comes from X's free embed service first. The paid X API is only
+    used for the author when that fails, so a raid start normally costs one
+    post read and no profile read.
     """
     conv, author = None, None
     x = get_x(context)
+    author = await oembed_author(tweet_id, handle_from_post_url(url))
     if x:
         try:
-            conv, author = await x.get_post_info(tweet_id)
+            if author and author.name:
+                conv = await x.get_conversation_id(tweet_id)
+            else:
+                conv, api_author = await x.get_post_info(tweet_id)
+                author = api_author or author
         except XApiError as e:
             log.warning("Couldn't look up the raid post on X: %s", e)
-    if author is None or not author.name:
-        author = await oembed_author(tweet_id, handle_from_post_url(url)) or author
     name = author.name if author else None
     handle = (author.username if author and author.username else None) or handle_from_post_url(url)
     return conv, name, handle
@@ -199,6 +205,36 @@ async def _post_raid(context: ContextTypes.DEFAULT_TYPE, chat_id: int, started_b
 
 # ---------------------------------------------------------------- tracking
 
+RESOLVE_RETRY_SECONDS = 24 * 3600
+
+
+async def resolve_x_ids(context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> None:
+    """Look up the X account ID of members who registered before the X key was
+    set. One paid lookup per person, retried at most once a day if it fails."""
+    x = get_x(context)
+    db = get_db(context)
+    tried = context.bot_data.setdefault("x_id_lookups", {})
+    for m in core.members_missing_x_id(db, chat_id):
+        if time.time() - tried.get(m["user_id"], 0) < RESOLVE_RETRY_SECONDS:
+            continue
+        tried[m["user_id"]] = time.time()
+        try:
+            found = await x.get_user(m["x_handle"])
+        except XRateLimited:
+            raise
+        except XApiError as e:
+            log.warning("Couldn't look up an X account ID: %s", e)
+            continue
+        if not found:
+            continue
+        # Never give one X account to two members.
+        if db.x_owner(found[1], found[0]) in (None, m["user_id"]):
+            try:
+                db.set_x_user_id(m["user_id"], found[0])
+            except sqlite3.IntegrityError:
+                log.warning("Two members registered the same X account; skipping the second.")
+
+
 async def poll_raid(context: ContextTypes.DEFAULT_TYPE, raid) -> None:
     """Fetch new replies for one raid and credit registered members."""
     x = get_x(context)
@@ -213,6 +249,7 @@ async def poll_raid(context: ContextTypes.DEFAULT_TYPE, raid) -> None:
         except XApiError:
             conv = raid["tweet_id"]
         db.update_raid(raid["id"], conversation_id=conv)
+    await resolve_x_ids(context, raid["chat_id"])
     replies, newest = await x.search_replies(conv, raid["since_id"])
     new = core.record_replies(db, raid, replies)
     fields = {"last_checked_at": time.time()}
