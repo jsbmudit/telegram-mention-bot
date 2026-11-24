@@ -197,8 +197,8 @@ KEEPING THE CHAT CLEAN
 - "@all" or "@raidall fun <link>" sent on their own are deleted the same way.
   If you wrote a real message around them ("@all gm fam, call in 10"), your
   message stays.
-- The bot's short answers (confirmations, errors, cooldown notes) delete after
-  15 seconds.
+- The bot's short answers (confirmations such as "X feed on", errors, cooldown
+  notes) delete after 15 seconds.
 - Previews, /templates, /raidhelp and /leaderboard answers delete after 1 minute.
 - The /settemplate and /setgreet prompts, and the message you sent with the
   template, are deleted once it's saved. You get a preview for 1 minute instead.

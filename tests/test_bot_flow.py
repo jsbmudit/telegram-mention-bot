@@ -537,10 +537,16 @@ async def _x_feed_and_rose_names(tmp_path):
 
     # 'pin' pins every new post with a notification, and works together with 'all'.
     tg.clear()
+    db.conn.execute("DELETE FROM scheduled_deletes")
+    db.conn.commit()
     await h.send(ADMIN, "/feedon VeronaOfficial pin all")
     feed = db.feeds_for_chat(chat_id)[0]
     assert feed["pin"] == 1 and feed["mode"] == "all"
     assert any("pinned with a notification" in t for t in tg.texts())
+    # The confirmation is only for the admin, so it deletes after 15 seconds like other confirmations.
+    # Two deletes are scheduled: the /feedon command itself and the confirmation.
+    waits = [r[0] - time.time() for r in db.conn.execute("SELECT delete_at FROM scheduled_deletes")]
+    assert len(waits) == 2 and all(0 < w <= 15 for w in waits)
     h.x.timeline += [Post("1005", "Pin me", 0.0, None, "post"),
                      Post("1006", "Pin me too", 0.0, "https://pbs.twimg.com/media/y.jpg", "post")]
     db.conn.execute("UPDATE feeds SET last_checked_at = 0")

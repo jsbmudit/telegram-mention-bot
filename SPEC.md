@@ -61,7 +61,7 @@ Status: built. Hosting will be decided next. Every command is explained in COMMA
 
 - Bot commands are deleted from the group about 3 seconds after they're sent.
 - `@all` / `@raidall name <link>` sent on their own are deleted too. A real message around them is left alone.
-- Short answers delete after 15 seconds; previews, lists, help and on-demand leaderboards after 1 minute.
+- Short answers delete after 15 seconds, including admin confirmations like "X feed on"; previews, lists, help and on-demand leaderboards after 1 minute.
 - The /register button deletes as soon as someone opens the bot through it, or after 15 seconds.
 - Setup prompts and the admin's template message are deleted once a template is saved.
 - The lock notice is removed when the chat unlocks.

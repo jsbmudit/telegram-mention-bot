@@ -14,7 +14,7 @@ from telegram.constants import ParseMode
 from telegram.error import TelegramError
 from telegram.ext import ContextTypes
 
-from .common import MEDIUM, get_cfg, get_db, get_x, is_admin, is_group, reply_temp
+from .common import MEDIUM, SHORT, get_cfg, get_db, get_x, is_admin, is_group, reply_temp
 from .utils import format_duration, is_due, normalize_x_handle
 from .xapi import Post, XApiError, XRateLimited
 
@@ -73,7 +73,7 @@ async def feedon_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         f"(@{html.escape(user['username'])}) will be posted here"
         f"{' and pinned with a notification' if pin else ''}. I check every {every}.\n"
         f"Turn it off with /feedoff {html.escape(user['username'])}",
-        MEDIUM,
+        SHORT,  # only the admin needs it, so it goes quickly like other confirmations
     )
 
 
