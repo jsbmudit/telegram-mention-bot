@@ -1,4 +1,4 @@
-"""/raidcsv, /leaderboard, /help and the weekly leaderboard post."""
+"""/raidcsv, /leaderboard, /raidhelp and the weekly leaderboard post."""
 
 import logging
 import time
@@ -129,8 +129,8 @@ HELP_TEXT = """<b>Raid bot commands</b>
 @raidall: tag everyone, then post and pin the default raid message
 @raidall fun: same, using the template called fun
 /endraid: end a raid early
-/lock 15 60m: lock the chat until 15 members comment, or for 60 min
-/unlock: unlock the chat
+/raidlock 15 60m: lock the chat until 15 members comment, or for 60 min
+/raidunlock: unlock the chat
 
 <b>Admins: templates</b>
 /settemplate: set the default raid template
@@ -140,12 +140,18 @@ HELP_TEXT = """<b>Raid bot commands</b>
 /deltemplate fun: delete a template
 Variables: {link} {xname} {xhandle} {xprofile}
 
+<b>Admins: X feed</b>
+/feedon VeronaOfficial: post that account's new X posts here
+/feedon VeronaOfficial all: also include replies and reposts
+/feedoff VeronaOfficial: stop it
+/feeds: list feeds in this group
+
 <b>Admins: setup</b>
 /addusers @a @b: add people to the tag list
 /removeuser @a: remove someone from the tag list
 /members: who is and isn't registered (sent privately)
-/setwelcome: set the welcome message (use {name})
-/welcome: post the welcome message
+/setgreet: set the welcome message (use {name})
+/greet: post the welcome message
 
 <b>Admins: reports</b> (sent to you privately)
 /raidcsv, /raidcsv 3, /raidcsv all"""

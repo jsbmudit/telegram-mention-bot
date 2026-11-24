@@ -76,8 +76,8 @@ Status: built. Hosting will be decided next. Every command is explained in COMMA
 
 ## 6. Lock
 
-- `/lock 15 60m` (admin): locks the chat for non-admins until 15 registered members have commented on the latest live raid, or until 60 minutes pass, whichever comes first.
-- `/unlock` (admin): ends the lock early.
+- `/raidlock 15 60m` (admin): locks the chat for non-admins until 15 registered members have commented on the latest live raid, or until 60 minutes pass, whichever comes first.
+- `/raidunlock` (admin): ends the lock early.
 - Only works while a raid is live.
 - The group's permissions are saved before locking and restored exactly afterwards.
 
@@ -103,9 +103,21 @@ Status: built. Hosting will be decided next. Every command is explained in COMMA
 - `/leaderboard` shows the current week.
 - Admins privately get a CSV of the top 5 with Verona addresses, for rewards.
 
-## 10. Welcome message
+## 10. X feed
 
-- `/setwelcome` (admin): set the same way as the template. It includes a Register button.
+- `/feedon VeronaOfficial` (admin): posts that account's new X posts into the group. `all` at the end also includes replies and reposts.
+- `/feedoff VeronaOfficial` stops it, `/feeds` lists what's on. Any number of accounts and groups.
+- Starts from the newest post, checks every 5 minutes (`FEED_INTERVAL_MINUTES`), sends images when a post has one, and caps at 10 posts per check so a long outage doesn't flood the chat.
+- One X request per account per check, even when several groups follow the same account.
+- Needs the X API key.
+
+## 11. Command names
+
+- Chosen so they don't clash with Rose: `/raidlock`, `/raidunlock`, `/greet`, `/setgreet`, `/raidhelp`.
+
+## 12. Welcome message
+
+- `/setgreet` (admin): set the same way as the template. It includes a Register button.
 - Posted automatically when someone joins.
-- `/welcome` (admin) posts it on demand. When used as a reply to someone, it's linked to that person.
+- `/greet` (admin) posts it on demand. When used as a reply to someone, it's linked to that person.
 - It deletes itself once the person registers, or after 24 hours, whichever comes first. Telegram doesn't let bots delete messages older than 48 hours.

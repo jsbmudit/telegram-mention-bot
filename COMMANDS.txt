@@ -3,6 +3,10 @@ RAID BOT COMMANDS
 
 Bot: @raids_bot
 
+Command names are picked so they don't clash with Rose or other group bots.
+That's why it's /raidlock instead of /lock, /greet instead of /welcome,
+and /raidhelp instead of /help.
+
 
 FOR EVERYONE
 ------------
@@ -25,7 +29,7 @@ FOR EVERYONE
     Streak: how many raids in a row you've joined.
     Weeks run Monday to Sunday (UTC).
 
-/help
+/raidhelp
     Shows the list of commands.
 
 
@@ -58,15 +62,38 @@ FOR ADMINS: TAGGING AND RAIDS
     Ends a raid early and posts the summary.
     If more than one raid is running, the bot shows buttons so you can pick which one.
 
-/lock 15 60m
+/raidlock 15 60m
     Locks the chat for everyone except admins until 15 registered members have
     commented on the latest raid, or until 60 minutes pass, whichever comes first.
-    Pick any numbers, for example /lock 10 30m, /lock 20 2h, /lock 30 90m.
+    Pick any numbers, for example /raidlock 10 30m, /raidlock 20 2h, /raidlock 30 90m.
     Only works while a raid is running. While locked, the bot checks for comments
     every 2 minutes. The group's normal permissions come back exactly as they were.
 
-/unlock
+/raidunlock
     Unlocks the chat early.
+
+
+FOR ADMINS: X FEED
+------------------
+Posts from any X account show up in the group automatically. Needs the X API key.
+
+/feedon VeronaOfficial
+    Starts posting that account's new X posts in this group. You can also use
+    @VeronaOfficial or the profile link. It starts from now, so old posts
+    aren't dumped in. The bot checks every 5 minutes. Posts with an image are
+    sent with the image. Replies and reposts are left out.
+
+/feedon VeronaOfficial all
+    Same, but also includes their replies and reposts.
+
+/feedoff VeronaOfficial
+    Stops it.
+
+/feeds
+    Lists the X feeds that are on in this group.
+
+    You can have as many feeds as you want, in as many groups as you want.
+    Feed posts stay in the chat (they aren't auto-deleted).
 
 
 FOR ADMINS: SETUP
@@ -114,18 +141,18 @@ FOR ADMINS: SETUP
 /deltemplate fun
     Deletes a template.
 
-/setwelcome
+/setgreet
     Sets the welcome message for new members. The bot asks you to send it next.
     Put {name} where the new member's name should go. A Register button is added
     automatically.
 
-/welcome
-    Posts the welcome message. Reply to someone's message with /welcome to
+/greet
+    Posts the welcome message. Reply to someone's message with /greet to
     welcome that person.
     The welcome message deletes itself once that person registers, or after 24 hours.
 
 /cancel
-    Stops /settemplate, /setwelcome or /register halfway through.
+    Stops /settemplate, /setgreet or /register halfway through.
 
 
 FOR ADMINS: REPORTS
@@ -154,15 +181,15 @@ Weekly leaderboard
 
 KEEPING THE CHAT CLEAN
 ----------------------
-- Every bot command (/addusers, /lock, /unlock, /raidcsv and so on) is deleted
+- Every bot command (/addusers, /raidlock, /raidunlock, /raidcsv and so on) is deleted
   from the group about 3 seconds after it's sent.
 - "@all" or "@raidall fun <link>" sent on their own are deleted the same way.
   If you wrote a real message around them ("@all gm fam, call in 10"), your
   message stays.
 - The bot's short answers (confirmations, errors, cooldown notes) delete after
   15 seconds.
-- Previews, /templates, /help and /leaderboard answers delete after 1 minute.
-- The /settemplate and /setwelcome prompts, and the message you sent with the
+- Previews, /templates, /raidhelp and /leaderboard answers delete after 1 minute.
+- The /settemplate and /setgreet prompts, and the message you sent with the
   template, are deleted once it's saved. You get a preview for 1 minute instead.
 - The "Chat locked" notice is removed when the chat unlocks.
 - Tag messages delete after 4 hours. Welcome messages delete when the person

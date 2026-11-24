@@ -108,6 +108,20 @@ CREATE TABLE IF NOT EXISTS templates (
     updated_at    REAL NOT NULL,
     PRIMARY KEY (chat_id, name)
 );
+
+-- X accounts whose posts are forwarded into a group (/feedon, /feedoff).
+CREATE TABLE IF NOT EXISTS feeds (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id         INTEGER NOT NULL,
+    x_user_id       TEXT NOT NULL,
+    handle          TEXT NOT NULL,
+    name            TEXT,
+    mode            TEXT NOT NULL DEFAULT 'posts',
+    since_id        TEXT,
+    last_checked_at REAL NOT NULL DEFAULT 0,
+    created_at      REAL NOT NULL,
+    UNIQUE (chat_id, x_user_id)
+);
 """
 
 DEFAULT_TEMPLATE = "default"
@@ -196,6 +210,31 @@ class Database:
     def delete_template(self, chat_id: int, name: str) -> bool:
         cur = self._run("DELETE FROM templates WHERE chat_id = ? AND name = ?", (chat_id, name.lower()))
         return cur.rowcount == 1
+
+    # ------------------------------------------------------------ feeds
+
+    def add_feed(self, chat_id: int, x_user_id: str, handle: str, name: str | None,
+                 mode: str, since_id: str | None) -> None:
+        self.ensure_group(chat_id)
+        self._run(
+            "INSERT INTO feeds(chat_id, x_user_id, handle, name, mode, since_id, created_at) "
+            "VALUES(?, ?, ?, ?, ?, ?, ?) ON CONFLICT(chat_id, x_user_id) DO UPDATE SET "
+            "handle = excluded.handle, name = excluded.name, mode = excluded.mode, since_id = excluded.since_id",
+            (chat_id, x_user_id, handle, name, mode, since_id, time.time()),
+        )
+
+    def remove_feed(self, chat_id: int, handle: str) -> bool:
+        cur = self._run("DELETE FROM feeds WHERE chat_id = ? AND lower(handle) = lower(?)", (chat_id, handle))
+        return cur.rowcount > 0
+
+    def feeds_for_chat(self, chat_id: int) -> list[sqlite3.Row]:
+        return self._all("SELECT * FROM feeds WHERE chat_id = ? ORDER BY handle", (chat_id,))
+
+    def all_feeds(self) -> list[sqlite3.Row]:
+        return self._all("SELECT * FROM feeds ORDER BY x_user_id")
+
+    def update_feed(self, feed_id: int, since_id: str | None, checked_at: float) -> None:
+        self._run("UPDATE feeds SET since_id = ?, last_checked_at = ? WHERE id = ?", (since_id, checked_at, feed_id))
 
     # ------------------------------------------------------------ users
 

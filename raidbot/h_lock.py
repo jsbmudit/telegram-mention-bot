@@ -1,4 +1,4 @@
-"""/lock and /unlock."""
+"""/raidlock and /raidunlock."""
 
 import json
 import logging
@@ -14,7 +14,7 @@ from .utils import format_duration, parse_duration
 
 log = logging.getLogger(__name__)
 
-USAGE = "Usage: /lock 15 60m\nThat locks the chat until 15 members comment on the raid, or for 60 minutes."
+USAGE = "Usage: /raidlock 15 60m\nThat locks the chat until 15 members comment on the raid, or for 60 minutes."
 
 # Used only if Telegram didn't tell us the group's permissions before locking.
 FALLBACK_PERMISSIONS = ChatPermissions(
@@ -39,7 +39,7 @@ async def lock_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await reply_temp(context, msg, "I didn't understand the time. Use something like 60m or 2h (max 24h).")
         return
     if db.active_lock(msg.chat_id):
-        await reply_temp(context, msg, "The chat is already locked. Use /unlock first.")
+        await reply_temp(context, msg, "The chat is already locked. Use /raidunlock first.")
         return
     raids = db.active_raids(msg.chat_id)
     if not raids:
@@ -70,7 +70,7 @@ async def lock_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         f"Go comment: {raid['url']}"
     )
     if not get_x(context):
-        text += "\n\nComment tracking is off (no X API key), so it will only open on the timer or with /unlock."
+        text += "\n\nComment tracking is off (no X API key), so it will only open on the timer or with /raidunlock."
     try:
         notice = await context.bot.send_message(
             msg.chat_id, text, parse_mode=ParseMode.HTML, disable_web_page_preview=True

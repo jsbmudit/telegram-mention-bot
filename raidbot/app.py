@@ -13,6 +13,7 @@ from telegram.ext import (
 from .common import delete_later, get_db, is_group, safe_delete
 from .config import Config
 from .db import Database
+from .h_feed import feed_job, feedoff_cmd, feedon_cmd, feeds_cmd
 from .h_lock import finish_lock, lock_cmd, unlock_cmd
 from .h_members import (
     addusers_cmd, members_cmd, on_chat_member, on_left_member, on_my_chat_member, on_new_members,
@@ -34,8 +35,8 @@ GROUP_COMMANDS = [
     BotCommand("all", "Admins: tag everyone"),
     BotCommand("raidall", "Admins: tag everyone and post the raid"),
     BotCommand("endraid", "Admins: end a raid early"),
-    BotCommand("lock", "Admins: lock chat, e.g. /lock 15 60m"),
-    BotCommand("unlock", "Admins: unlock the chat"),
+    BotCommand("raidlock", "Admins: lock chat, e.g. /raidlock 15 60m"),
+    BotCommand("raidunlock", "Admins: unlock the chat"),
     BotCommand("addusers", "Admins: add @usernames to the tag list"),
     BotCommand("removeuser", "Admins: remove someone from the tag list"),
     BotCommand("members", "Admins: who is registered"),
@@ -43,16 +44,19 @@ GROUP_COMMANDS = [
     BotCommand("templates", "Admins: list raid templates"),
     BotCommand("template", "Admins: preview a template, e.g. /template fun"),
     BotCommand("deltemplate", "Admins: delete a template"),
-    BotCommand("setwelcome", "Admins: set the welcome message"),
-    BotCommand("welcome", "Admins: post the welcome message"),
+    BotCommand("setgreet", "Admins: set the welcome message"),
+    BotCommand("greet", "Admins: post the welcome message"),
     BotCommand("raidcsv", "Admins: get a raid report privately"),
-    BotCommand("help", "All commands"),
+    BotCommand("feedon", "Admins: post an X account's posts here"),
+    BotCommand("feedoff", "Admins: stop an X feed"),
+    BotCommand("feeds", "Admins: list X feeds"),
+    BotCommand("raidhelp", "All commands"),
 ]
 PRIVATE_COMMANDS = [
     BotCommand("register", "Link your X account and Verona address"),
     BotCommand("me", "See what you registered"),
     BotCommand("cancel", "Stop registering"),
-    BotCommand("help", "All commands"),
+    BotCommand("raidhelp", "All commands"),
 ]
 
 
@@ -153,16 +157,17 @@ def build_app(cfg: Config, request=None, rate_limit: bool = True) -> Application
 
     commands = {
         "all": all_cmd, "raidall": raidall_cmd, "allraid": raidall_cmd, "endraid": endraid_cmd,
-        "lock": lock_cmd, "unlock": unlock_cmd, "addusers": addusers_cmd, "removeuser": removeuser_cmd,
+        "raidlock": lock_cmd, "raidunlock": unlock_cmd, "addusers": addusers_cmd, "removeuser": removeuser_cmd,
         "members": members_cmd, "template": template_cmd, "templates": templates_cmd,
-        "deltemplate": deltemplate_cmd, "welcome": welcome_cmd, "raidcsv": raidcsv_cmd,
+        "deltemplate": deltemplate_cmd, "feedon": feedon_cmd, "feedoff": feedoff_cmd, "feeds": feeds_cmd, "greet": welcome_cmd, "raidcsv": raidcsv_cmd,
     }
     for name, fn in commands.items():
         app.add_handler(CommandHandler(name, fn, filters=groups))
     app.add_handler(CommandHandler("register", register_in_group, filters=groups))
     app.add_handler(CommandHandler("me", me_cmd, filters=private))
     app.add_handler(CommandHandler("leaderboard", leaderboard_cmd))
-    app.add_handler(CommandHandler("help", help_cmd))
+    app.add_handler(CommandHandler("raidhelp", help_cmd))
+    app.add_handler(CommandHandler("help", help_cmd, filters=private))  # no clash with other bots in private
     app.add_handler(CallbackQueryHandler(endraid_button, pattern=r"^endraid:\d+$"))
 
     trigger = filters.Regex(TRIGGER_RE) | filters.CaptionRegex(TRIGGER_RE)
@@ -174,6 +179,7 @@ def build_app(cfg: Config, request=None, rate_limit: bool = True) -> Application
     jq.run_repeating(delete_job, interval=5, first=5, name="deletes")
     jq.run_repeating(housekeeping_job, interval=60, first=10, name="housekeeping")
     jq.run_repeating(tracking_job, interval=60, first=30, name="tracking")
+    jq.run_repeating(feed_job, interval=60, first=45, name="feeds")
     jq.run_repeating(weekly_job, interval=3600, first=60, name="weekly")
     return app
 

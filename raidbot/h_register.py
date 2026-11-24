@@ -70,7 +70,7 @@ async def start_private(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         "Hi! I run raids in your Telegram group.\n\n"
         "Send /register to link your X account and Verona address so your raids get tracked.\n"
         "Send /me to see what you registered.\n"
-        "Send /help for all commands."
+        "Send /raidhelp for all commands."
     )
     return ConversationHandler.END
 

@@ -124,9 +124,9 @@ async def _introduce(context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> None:
     text = (
         "Hi! I'm the raid bot.\n\n"
         "To work properly I need to be an <b>admin</b> with these rights: delete messages, "
-        "pin messages and ban users (needed for /lock).\n\n"
+        "pin messages and ban users (needed for /raidlock).\n\n"
         "Admins: add your members with /addusers @name1 @name2, set a raid template with "
-        "/settemplate, then use @all or @raidall. Send /help for all commands."
+        "/settemplate, then use @all or @raidall. Send /raidhelp for all commands."
     )
     try:
         await context.bot.send_message(chat_id, text, parse_mode=ParseMode.HTML)

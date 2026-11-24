@@ -16,6 +16,7 @@ class Config:
     db_path: str
     track_interval: int  # seconds between reply checks for a normal raid
     lock_check_interval: int  # seconds between reply checks while the chat is locked
+    feed_interval: int = 5 * 60  # seconds between checks for new posts from followed X accounts
     raid_duration: int = 12 * 3600
     tag_cooldown: int = 15 * 60
     tag_delete_after: int = 4 * 3600
@@ -64,6 +65,7 @@ def load_config() -> Config:
         db_path=os.environ.get("DB_PATH", "").strip() or "raidbot.db",
         track_interval=max(60, _int_env("TRACK_INTERVAL_MINUTES", 10) * 60),
         lock_check_interval=max(60, _int_env("LOCK_CHECK_INTERVAL_MINUTES", 2) * 60),
+        feed_interval=max(60, _int_env("FEED_INTERVAL_MINUTES", 5) * 60),
     )
 
 

@@ -72,6 +72,15 @@ async def oembed_author(tweet_id: str, handle: str | None = None) -> PostAuthor 
     return PostAuthor(name=data.get("author_name") or None, username=username)
 
 
+@dataclass
+class Post:
+    id: str
+    text: str
+    created_at: float
+    photo_url: str | None = None
+    kind: str = "post"  # post, reply, repost or quote
+
+
 class XClient:
     def __init__(self, bearer_token: str, base_url: str = "https://api.x.com/2"):
         self._client = httpx.AsyncClient(
@@ -113,6 +122,53 @@ class XClient:
         if not user:
             return None
         return str(user["id"]), user["username"]
+
+    async def lookup_user(self, username: str) -> dict | None:
+        """{'id', 'username', 'name'} for an account, or None if it doesn't exist."""
+        try:
+            data = await self._get(f"/users/by/username/{username}", {"user.fields": "name"})
+        except XNotFound:
+            return None
+        user = data.get("data")
+        if not user:
+            return None
+        return {"id": str(user["id"]), "username": user["username"], "name": user.get("name")}
+
+    async def user_posts(self, user_id: str, since_id: str | None = None, include_all: bool = False,
+                         max_results: int = 100, max_pages: int = 3) -> list[Post]:
+        """An account's newest posts (newest first). Without include_all, replies
+        and reposts are left out."""
+        params = {
+            "max_results": max(5, min(100, max_results)),
+            "tweet.fields": "created_at,note_tweet,referenced_tweets,attachments",
+            "expansions": "attachments.media_keys",
+            "media.fields": "type,url,preview_image_url",
+        }
+        if since_id:
+            params["since_id"] = since_id
+        if not include_all:
+            params["exclude"] = "replies,retweets"
+        posts: list[Post] = []
+        for _ in range(max_pages):
+            data = await self._get(f"/users/{user_id}/tweets", params)
+            media = {m["media_key"]: m for m in (data.get("includes") or {}).get("media", [])}
+            for t in data.get("data") or []:
+                text = (t.get("note_tweet") or {}).get("text") or t.get("text") or ""
+                refs = {r.get("type") for r in t.get("referenced_tweets") or []}
+                kind = ("repost" if "retweeted" in refs else "reply" if "replied_to" in refs
+                        else "quote" if "quoted" in refs else "post")
+                photo = None
+                for key in (t.get("attachments") or {}).get("media_keys", []):
+                    m = media.get(key) or {}
+                    photo = m.get("url") or m.get("preview_image_url")
+                    if photo:
+                        break
+                posts.append(Post(str(t["id"]), text, _parse_time(t.get("created_at"), str(t["id"])), photo, kind))
+            token = (data.get("meta") or {}).get("next_token")
+            if not token or max_results < 100:
+                break
+            params["pagination_token"] = token
+        return posts
 
     async def get_post_info(self, tweet_id: str) -> tuple[str | None, PostAuthor | None]:
         """(conversation_id, author) for a post, in one request."""

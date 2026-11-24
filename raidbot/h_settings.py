@@ -1,4 +1,4 @@
-"""Named raid templates (/settemplate, /templates, /template, /deltemplate) and /setwelcome.
+"""Named raid templates (/settemplate, /templates, /template, /deltemplate) and /setgreet.
 
 Setup chatter cleans itself up: the bot's prompts and the admin's own template
 message are deleted once the template is saved, and previews delete after a minute.
@@ -135,7 +135,7 @@ async def settemplate_save(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     return ConversationHandler.END
 
 
-# ---------------------------------------------------------------- /setwelcome
+# ---------------------------------------------------------------- /setgreet
 
 async def setwelcome_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     msg = update.effective_message
@@ -229,7 +229,7 @@ def build_settings_handler() -> ConversationHandler:
     return ConversationHandler(
         entry_points=[
             CommandHandler("settemplate", settemplate_start, filters=groups),
-            CommandHandler("setwelcome", setwelcome_start, filters=groups),
+            CommandHandler("setgreet", setwelcome_start, filters=groups),
         ],
         states={
             WAIT_TEMPLATE: [MessageHandler(text | (groups & filters.PHOTO), settemplate_save)],

@@ -17,10 +17,11 @@ from telegram.ext import CallbackContext
 from telegram.request import BaseRequest
 
 from raidbot.app import build_app, delete_job, housekeeping_job
+from raidbot.h_feed import feed_job
 from raidbot.config import Config
 from raidbot.h_raid import tracking_job
 from raidbot.utils import bech32_encode, convert_bits
-from raidbot.xapi import PostAuthor, Reply
+from raidbot.xapi import Post, PostAuthor, Reply
 
 BOT_ID = 5000
 ADMIN = {"id": 1, "is_bot": False, "first_name": "Admin", "username": "boss"}
@@ -110,6 +111,20 @@ class FakeX:
 
     async def get_conversation_id(self, tweet_id):
         return tweet_id
+
+    timeline: list = []
+
+    async def lookup_user(self, username):
+        if username.lower() == "veronaofficial":
+            return {"id": "4242", "username": "VeronaOfficial", "name": "Verona"}
+        return None
+
+    async def user_posts(self, user_id, since_id=None, include_all=False, max_results=100, max_pages=3):
+        self.timeline_calls = getattr(self, "timeline_calls", 0) + 1
+        posts = [p for p in self.timeline if include_all or p.kind in ("post", "quote")]
+        if since_id:
+            posts = [p for p in posts if int(p.id) > int(since_id)]
+        return sorted(posts, key=lambda p: -int(p.id))[:max_results]
 
     async def get_post_info(self, tweet_id):
         return tweet_id, PostAuthor(name="Andyyy", username="andyyy")
@@ -263,7 +278,7 @@ async def _full_raid_flow(tmp_path):
 
     # 8. Lock until 2 comments. Bob registers and comments, lock opens on the next check.
     tg.clear()
-    await h.send(ADMIN, "/lock 2 60m")
+    await h.send(ADMIN, "/raidlock 2 60m")
     perms = tg.of("setChatPermissions")
     assert len(perms) == 1 and "Chat locked" in tg.texts()[-1]
     await h.register(BOB, "bobx", wallet(2))
@@ -427,11 +442,11 @@ async def _cleanup_and_named_templates(tmp_path):
 
     # Lock notice is removed when the chat unlocks; the summary stays.
     tg.clear()
-    await h.send(ADMIN, "/lock 5 30m")
+    await h.send(ADMIN, "/raidlock 5 30m")
     notice_id = db.active_lock(chat_id)["message_id"]
     assert notice_id
     tg.clear()
-    await h.send(ADMIN, "/unlock")
+    await h.send(ADMIN, "/raidunlock")
     assert notice_id in [int(p["message_id"]) for p in tg.of("deleteMessage")]
     summary = tg.texts()[-1]
     assert "Chat unlocked" in summary
@@ -444,5 +459,77 @@ async def _cleanup_and_named_templates(tmp_path):
     await delete_job(h.ctx)
     assert tg.of("deleteMessage")
     assert db.conn.execute("SELECT COUNT(*) FROM scheduled_deletes WHERE kind = 'temp'").fetchone()[0] == 0
+
+    await h.app.shutdown()
+
+
+def test_x_feed_and_rose_names(tmp_path):
+    asyncio.run(_x_feed_and_rose_names(tmp_path))
+
+
+async def _x_feed_and_rose_names(tmp_path):
+    h = Harness(tmp_path)
+    tg, db = h.tg, h.db
+    await h.start()
+    chat_id = CHAT["id"]
+
+    # Rose's /lock is not ours: the bot ignores it and doesn't delete it.
+    tg.clear()
+    await h.send(ADMIN, "/lock")
+    assert tg.calls == [] and _scheduled(db, h.last_id) == []
+
+    # Without the X key the feed explains what's missing.
+    h.app.bot_data["x"] = None
+    await h.send(ADMIN, "/feedon VeronaOfficial")
+    assert any("needs the X API key" in t for t in tg.texts())
+    h.app.bot_data["x"] = h.x
+
+    # Turning it on starts from the newest post, so old posts aren't dumped in.
+    h.x.timeline = [Post("1000", "old post", 0.0)]
+    await h.send(ADMIN, "/feedon https://x.com/VeronaOfficial")
+    feed = db.feeds_for_chat(chat_id)[0]
+    assert feed["handle"] == "VeronaOfficial" and feed["since_id"] == "1000" and feed["mode"] == "posts"
+
+    # New post with an image is forwarded; the reply is skipped in posts mode.
+    h.x.timeline += [
+        Post("1001", "gm Verona fam https://t.co/abc123", 0.0, "https://pbs.twimg.com/media/x.jpg", "post"),
+        Post("1002", "@someone thanks!", 0.0, None, "reply"),
+        Post("1003", "Big news <soon>", 0.0, None, "post"),
+    ]
+    tg.clear()
+    await feed_job(h.ctx)
+    photos = tg.of("sendPhoto")
+    assert len(photos) == 1 and photos[0]["photo"] == "https://pbs.twimg.com/media/x.jpg"
+    assert "gm Verona fam" in photos[0]["caption"] and "t.co" not in photos[0]["caption"]
+    assert "https://x.com/VeronaOfficial/status/1001" in photos[0]["caption"]
+    texts = tg.texts()
+    assert len(texts) == 1 and "Big news &lt;soon&gt;" in texts[0] and "thanks" not in texts[0]
+    assert db.feeds_for_chat(chat_id)[0]["since_id"] == "1003"
+
+    # Not due again yet; and once due, nothing is posted twice.
+    calls = h.x.timeline_calls
+    await feed_job(h.ctx)
+    assert h.x.timeline_calls == calls
+    db.conn.execute("UPDATE feeds SET last_checked_at = 0")
+    db.conn.commit()
+    tg.clear()
+    await feed_job(h.ctx)
+    assert tg.of("sendPhoto") == [] and tg.of("sendMessage") == []
+
+    # 'all' mode includes replies.
+    await h.send(ADMIN, "/feedon VeronaOfficial all")
+    h.x.timeline.append(Post("1004", "@fan yes!", 0.0, None, "reply"))
+    db.conn.execute("UPDATE feeds SET last_checked_at = 0")
+    db.conn.commit()
+    tg.clear()
+    await feed_job(h.ctx)
+    assert any("replied on X" in t and "@fan yes!" in t for t in tg.texts())
+
+    # /feeds lists it, /feedoff stops it.
+    tg.clear()
+    await h.send(ADMIN, "/feeds")
+    assert any("@VeronaOfficial" in t for t in tg.texts())
+    await h.send(ADMIN, "/feedoff @VeronaOfficial")
+    assert db.feeds_for_chat(chat_id) == []
 
     await h.app.shutdown()
