@@ -130,6 +130,7 @@ HELP_TEXT = """<b>Raid bot commands</b>
 @all: tag everyone (15 min cooldown, tags delete after 4h)
 @raidall: tag everyone, then post and pin the default raid message
 @raidall fun: same, using the template called fun
+Reply @raidall to your own message with an X link: tag everyone, pin your message and track it as a raid
 /endraid: end a raid early
 /raidlock 15 60m: lock the chat until 15 members comment, or for 60 min
 /raidunlock: unlock the chat

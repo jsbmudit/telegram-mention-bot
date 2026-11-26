@@ -25,6 +25,9 @@ from .xapi import XApiError, XRateLimited, oembed_author
 
 log = logging.getLogger(__name__)
 
+# Used by @raidall when a group hasn't set any template yet.
+BUILTIN_TEMPLATE = "🚨 <b>RAID TIME</b> 🚨\n\nGo like, repost and comment:\n{link}"
+
 TRIGGER_RE = re.compile(r"(?<![\w@/])@(raidall|allraid|all)(?!\w)", re.IGNORECASE)
 LINK_LOOKBACK = 24 * 3600
 
@@ -61,18 +64,25 @@ def find_raid_link(context: ContextTypes.DEFAULT_TYPE, msg: Message) -> tuple[st
 
 
 def pick_template(db, chat_id: int, words: list[str]):
-    """Choose the template for @raidall. Returns (template row, remaining words, error)."""
+    """Choose the template for @raidall. Returns (template row, remaining words, error).
+
+    A template of None with no error means the group has no templates, so the
+    built-in raid message is used.
+    """
     templates = db.list_templates(chat_id)
-    if not templates:
-        return None, words, "There's no raid template yet. An admin can make one with /settemplate."
     first = words[0].lower() if words else ""
     if first:
         tpl = db.get_template(chat_id, first)
         if tpl:
             return tpl, words[1:], None
         if len(words) == 1 and valid_template_name(first):
+            if not templates:
+                return None, words, (f"There's no template called {html.escape(first)}. Make it with "
+                                     f"/settemplate {html.escape(first)}, or use @raidall on its own.")
             names = ", ".join(t["name"] for t in templates)
             return None, words, f"There's no template called {html.escape(first)}. Templates: {html.escape(names)}"
+    if not templates:
+        return None, words, None
     tpl = db.get_template(chat_id, DEFAULT_TEMPLATE)
     if tpl:
         return tpl, words, None
@@ -93,11 +103,19 @@ async def start_tagging(update: Update, context: ContextTypes.DEFAULT_TYPE, raid
     words = X_STATUS_RE.sub(" ", args_text).split()
 
     template = None
+    reply_post = None  # the replied-to message, when it is itself the raid post
     if raid:
-        template, words, error = pick_template(db, msg.chat_id, words)
-        if error:
-            await tell_admin(context, msg, error)
-            return
+        reply = msg.reply_to_message
+        names_template = bool(words) and db.get_template(msg.chat_id, words[0]) is not None
+        if reply is not None and not names_template and not message_links(msg) and message_links(reply):
+            # "@raidall" as a reply to a message with an X link: that message is the raid post.
+            # Only "@raidall <template name>" posts a template instead.
+            reply_post = reply
+        else:
+            template, words, error = pick_template(db, msg.chat_id, words)
+            if error:
+                await tell_admin(context, msg, error)
+                return
 
     # "@all" or "@raidall fun <link>" on its own is just a command: tidy it away.
     # If the admin wrote a real message around it, leave their message alone.
@@ -128,13 +146,15 @@ async def start_tagging(update: Update, context: ContextTypes.DEFAULT_TYPE, raid
     # Tagging a big group takes a while because of Telegram's limits, so run it
     # in the background and keep answering other messages meanwhile.
     context.application.create_task(
-        _run_tagging(context, msg.chat_id, sender_key(msg), link, template["name"] if template else None),
+        _run_tagging(context, msg.chat_id, sender_key(msg), link, template["name"] if template else None,
+                     reply_post.message_id if reply_post else None),
         update=update,
     )
 
 
 async def _run_tagging(context: ContextTypes.DEFAULT_TYPE, chat_id: int, started_by: int,
-                       link: tuple[str, str] | None, template_name: str | None) -> None:
+                       link: tuple[str, str] | None, template_name: str | None,
+                       raid_post_id: int | None = None) -> None:
     locks = context.bot_data.setdefault("tag_locks", {})
     lock = locks.setdefault(chat_id, asyncio.Lock())
     async with lock:
@@ -148,7 +168,9 @@ async def _run_tagging(context: ContextTypes.DEFAULT_TYPE, chat_id: int, started
                 db.schedule_delete(chat_id, sent.message_id, delete_at, "tag")
             except TelegramError as e:
                 log.warning("A tag batch failed in chat %s: %s", chat_id, e)
-        if link:
+        if link and raid_post_id:
+            await _raid_on_message(context, chat_id, started_by, link[0], link[1], raid_post_id)
+        elif link:
             await _post_raid(context, chat_id, started_by, link[0], link[1], template_name)
 
 
@@ -182,31 +204,55 @@ def _admin_id(started_by: int) -> int | None:
 
 
 async def _post_raid(context: ContextTypes.DEFAULT_TYPE, chat_id: int, started_by: int,
-                     tweet_id: str, url: str, template_name: str) -> None:
+                     tweet_id: str, url: str, template_name: str | None) -> None:
+    """Post the raid message from a template (or the built-in one), then start the raid."""
     from .h_settings import post_template
 
-    db, cfg = get_db(context), get_cfg(context)
-    tpl = db.get_template(chat_id, template_name)
-    if not tpl:
-        await tell_admin_id(context, chat_id, _admin_id(started_by),
-                            f"The template {html.escape(template_name)} was deleted. Raid not posted.", MEDIUM)
-        return
+    db = get_db(context)
+    if template_name is None:
+        body, photo = BUILTIN_TEMPLATE, None
+    else:
+        tpl = db.get_template(chat_id, template_name)
+        if not tpl:
+            await tell_admin_id(context, chat_id, _admin_id(started_by),
+                                f"The template {html.escape(template_name)} was deleted. Raid not posted.", MEDIUM)
+            return
+        body, photo = tpl["body_html"], tpl["photo_file_id"]
     conv, xname, xhandle = await lookup_author(context, tweet_id, url)
-    text = render_template(tpl["body_html"], url, xname, xhandle)
+    text = render_template(body, url, xname, xhandle)
     try:
-        main, _ = await post_template(context, chat_id, text, tpl["photo_file_id"])
+        main, _ = await post_template(context, chat_id, text, photo)
     except TelegramError as e:
         log.warning("Couldn't post the raid message in chat %s: %s", chat_id, e)
         await tell_admin_id(context, chat_id, _admin_id(started_by),
                             "I couldn't post the raid message. Check the template with /template.", MEDIUM)
         return
+    await _start_raid(context, chat_id, started_by, tweet_id, url, conv, main.message_id)
 
-    raid = db.create_raid(chat_id, tweet_id, url, started_by, cfg.raid_duration, main.message_id)
+
+async def _raid_on_message(context: ContextTypes.DEFAULT_TYPE, chat_id: int, started_by: int,
+                           tweet_id: str, url: str, message_id: int) -> None:
+    """Start a raid on a message the admin posted themselves. No template is posted."""
+    x = get_x(context)
+    conv = None
+    if x:
+        try:
+            conv = await x.get_conversation_id(tweet_id)
+        except XApiError as e:
+            log.warning("Couldn't look up the raid post on X: %s", e)
+    await _start_raid(context, chat_id, started_by, tweet_id, url, conv, message_id)
+
+
+async def _start_raid(context: ContextTypes.DEFAULT_TYPE, chat_id: int, started_by: int,
+                      tweet_id: str, url: str, conv: str | None, message_id: int) -> None:
+    """Record the raid so replies are tracked, and pin its message with a notification."""
+    db, cfg = get_db(context), get_cfg(context)
+    raid = db.create_raid(chat_id, tweet_id, url, started_by, cfg.raid_duration, message_id)
     if get_x(context):
         db.update_raid(raid["id"], conversation_id=conv or tweet_id)
 
     try:
-        await context.bot.pin_chat_message(chat_id, main.message_id, disable_notification=False)
+        await context.bot.pin_chat_message(chat_id, message_id, disable_notification=False)
     except TelegramError as e:
         log.warning("Couldn't pin in chat %s: %s", chat_id, e)
         await tell_admin_id(context, chat_id, _admin_id(started_by),
