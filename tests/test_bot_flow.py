@@ -761,3 +761,96 @@ async def _backups(tmp_path):
     assert db2.get_group(chat_id)["welcome_html"] == "Hi {name}"
     assert any(m["user_id"] == 11 for m in db2.list_members(chat_id))
     db2.close()
+
+
+def test_raidall_as_reply_and_without_templates(tmp_path):
+    asyncio.run(_raidall_as_reply_and_without_templates(tmp_path))
+
+
+async def _raidall_as_reply_and_without_templates(tmp_path):
+    h = Harness(tmp_path)
+    tg, db = h.tg, h.db
+    await h.start()
+    chat_id = CHAT["id"]
+    await h.send(ADMIN, "/addusers @alice @bobby")
+    await h.send(ALICE, "gm")
+    await h.register(ALICE, "alicex", wallet(1))
+    assert db.list_templates(chat_id) == []  # no template set in this group
+
+    def raid_msg(text):
+        return {"message_id": h.last_id, "date": int(time.time()), "chat": CHAT, "from": ADMIN, "text": text}
+
+    def group_texts():
+        return [p["text"] for p in tg.of("sendMessage") if int(p["chat_id"]) == chat_id]
+
+    # The admin posts their own raid message, then replies to it with @raidall.
+    link1 = "https://x.com/Burnt/status/1861234567890777777"
+    await h.send(ADMIN, f"Raid this one fam, drop your best replies 👇 {link1}")
+    own = raid_msg(f"Raid this one fam, drop your best replies 👇 {link1}")
+    tg.clear()
+    await h.send(ADMIN, "@raidall", reply_to=own)
+    texts = group_texts()
+    assert texts and all("RAID TIME" not in t for t in texts)  # only tags: no template posted
+    assert any("@alice" in t for t in texts)
+    raid = db.latest_raid(chat_id)
+    assert raid["tweet_id"] == "1861234567890777777" and raid["message_id"] == own["message_id"]
+    assert raid["status"] == "active"
+    # The admin's own message is pinned with a notification.
+    pins = tg.of("pinChatMessage")
+    assert [int(p["message_id"]) for p in pins] == [own["message_id"]] and not pins[0].get("disable_notification")
+
+    # It's tracked like any raid and shows up in /raidcsv.
+    h.x.replies = [Reply("9101", "111", None, raid["started_at"] + 40)]
+    await tracking_job(h.ctx)
+    assert db.engagement_count(raid["id"]) == 1
+    tg.files.clear()
+    await h.send(ADMIN, "/raidcsv")
+    csv_text = b"".join(f for f in tg.files if isinstance(f, bytes)).decode("utf-8-sig", "ignore")
+    assert link1 in csv_text and "https://x.com/AliceX" in csv_text
+
+    # @all as a reply still only tags: no raid.
+    db.set_group(chat_id, "last_tag_at", 0)
+    raids_before = len(db.list_raids(chat_id))
+    await h.send(ADMIN, "Look at this https://x.com/Burnt/status/1861234567890888888")
+    other = raid_msg("Look at this https://x.com/Burnt/status/1861234567890888888")
+    tg.clear()
+    await h.send(ADMIN, "@all", reply_to=other)
+    assert group_texts() and tg.of("pinChatMessage") == []
+    assert len(db.list_raids(chat_id)) == raids_before
+
+    # No template and not a reply: the built-in raid message is posted and pinned.
+    db.set_group(chat_id, "last_tag_at", 0)
+    link2 = "https://x.com/Burnt/status/1861234567890999000"
+    tg.clear()
+    await h.send(ADMIN, f"@raidall {link2}")
+    builtin = [t for t in group_texts() if "RAID TIME" in t]
+    assert len(builtin) == 1 and link2 in builtin[0]
+    assert db.latest_raid(chat_id)["tweet_id"] == "1861234567890999000" and len(tg.of("pinChatMessage")) == 1
+
+    # A template name that doesn't exist gets a private hint, and nothing starts.
+    db.set_group(chat_id, "last_tag_at", 0)
+    raids_before = len(db.list_raids(chat_id))
+    tg.clear()
+    await h.send(ADMIN, f"@raidall fun {link2}")
+    hint = [p for p in tg.of("sendMessage") if "no template called fun" in p["text"]]
+    assert len(hint) == 1 and int(hint[0]["chat_id"]) == ADMIN["id"]
+    assert len(db.list_raids(chat_id)) == raids_before
+
+    # With templates set, a plain reply (even with extra words) still uses the admin's message...
+    db.save_template(chat_id, "default", "DEFAULT {link}", None)
+    db.save_template(chat_id, "fun", "FUN {link}", None)
+    link3 = "https://x.com/Burnt/status/1861234567890999111"
+    await h.send(ADMIN, f"New one {link3}")
+    own3 = raid_msg(f"New one {link3}")
+    db.set_group(chat_id, "last_tag_at", 0)
+    tg.clear()
+    await h.send(ADMIN, "@raidall let's go fam", reply_to=own3)
+    assert all("DEFAULT" not in t and "FUN" not in t for t in group_texts())
+    assert db.latest_raid(chat_id)["message_id"] == own3["message_id"]
+    # ...and "@raidall fun" as a reply posts the fun template with the replied link.
+    db.set_group(chat_id, "last_tag_at", 0)
+    tg.clear()
+    await h.send(ADMIN, "@raidall fun", reply_to=own3)
+    assert any(t == f"FUN {link3}" for t in group_texts())
+
+    await h.app.shutdown()

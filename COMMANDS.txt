@@ -50,6 +50,8 @@ FOR ADMINS: TAGGING AND RAIDS
     and pins it with a notification to everyone.
     @raidall on its own uses the default template. @raidall fun uses the
     template called fun (see /settemplate below).
+    If the group has no template yet, the bot posts a simple built-in one:
+    "RAID TIME", then the link.
     The link is taken from, in this order:
       1. the same message (example: @raidall fun https://x.com/name/status/123)
       2. the message you're replying to
@@ -57,6 +59,16 @@ FOR ADMINS: TAGGING AND RAIDS
     A raid lasts 12 hours. While it runs, the bot checks the post's replies
     every minute and counts comments from registered members only.
     @allraid, /raidall and /allraid do the same thing.
+
+@raidall as a reply (raid your own message)
+    Post your own raid message with the X link in it, then reply to that
+    message with @raidall. The bot tags everyone, pins your message with a
+    notification, and tracks the raid like any other: comments are counted,
+    it shows up in /raidcsv and on the leaderboard.
+    No template is needed, and the bot doesn't post one.
+    Extra words are fine (@raidall let's go fam). Only @raidall fun, with a
+    template name, posts that template instead.
+    @all as a reply still only tags. It never starts a raid.
 
 /endraid
     Ends a raid early and posts the summary. Any "Chat unlocked" summary from

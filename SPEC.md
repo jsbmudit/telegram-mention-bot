@@ -54,7 +54,13 @@ Status: built. Hosting will be decided next. Every command is explained in COMMA
   1. Uses the X link in the same message, or the latest X link the same admin posted.
   2. Tags everyone, the same way as `@all`.
   3. Posts the chosen template with the link and author filled in, with its image if it has one.
+     If the group has no templates yet, it posts a built-in raid message instead: "RAID TIME", then the link.
   4. Pins it with notification. It is never unpinned.
+- Raiding your own message: post your own raid message with the X link, then reply to it with `@raidall`.
+  The bot tags everyone, pins your message with a notification and tracks the raid. No template is needed
+  and none is posted. Extra words after `@raidall` are fine. Only `@raidall <template name>` as a reply
+  posts that template instead, using the link from the message you replied to.
+- `@all` as a reply still only tags. It never starts a raid.
 - A raid lasts 12 hours, or until `/endraid`.
 - More than one raid can be live at the same time. If several are live, `/endraid` sends the admin buttons privately so they can pick which one to end.
 
